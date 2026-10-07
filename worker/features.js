@@ -1,5 +1,5 @@
-import {CLASS_IDS} from '../public/classes.js';
-import {digest,authenticated,passwordHash,randomToken} from './admin.js';
+import {CLASS_IDS,DEFAULT_CLASS,DEFAULT_TEACHER_NAMES} from '../public/classes.js';
+import {digest,passwordHash,randomToken} from './admin.js';
 export const FIRST_YEAR='2026-2027';
 const featureJson=(data,status=200,headers={})=>Response.json(data,{status,headers:{'Cache-Control':'no-store',...headers}});
 export async function yearsState(db){const [rows]=await db.batch([db.prepare('SELECT year FROM school_years ORDER BY year DESC')]);const years=[...new Set([FIRST_YEAR,...rows.results.map(r=>r.year)])].sort().reverse();return {years,currentYear:years[0]};}
@@ -12,14 +12,7 @@ export function schoolDatabase(db,year){
 }
 export async function yearEnvironment(request,env,initialRound){const state=await yearsState(env.DB);const year=new URL(request.url).searchParams.get('year')||state.currentYear;if(!state.years.includes(year))throw new Error('Onbekend schooljaar.');return {...env,RAW_DB:env.DB,DB:schoolDatabase(env.DB,year),YEAR:{...state,year,archived:year!==state.currentYear,initialRound:year===FIRST_YEAR?initialRound:initialRound+':'+year}};}
 export async function favoriteData(db,classId,round,voter,visible){const [mine,counts]=await db.batch([db.prepare('SELECT teacher_id FROM favorites WHERE class_id = ? AND round_id = ? AND voter_id = ?').bind(classId,round,voter),db.prepare('SELECT teacher_id, COUNT(*) AS count FROM favorites WHERE class_id = ? AND round_id = ? GROUP BY teacher_id').bind(classId,round)]);return {myFavorite:mine.results[0]?.teacher_id||null,favoriteResults:visible?counts.results:[]};}
-export async function moderationState(env){const [rows]=await env.DB.batch([env.DB.prepare("SELECT object_key, teacher_name, uploaded_at FROM photo_submissions WHERE status = 'pending' ORDER BY uploaded_at")]);return rows.results.map(r=>({key:r.object_key,name:r.teacher_name,url:'/photos/'+r.object_key,uploadedAt:r.uploaded_at}));}
-export async function moderatePhoto(env,body,date){
- if(!/^[a-f0-9-]{36}$/.test(body.key||'')||!['approve','reject'].includes(body.action)||Object.keys(body).some(k=>!['key','action'].includes(k)))return featureJson({error:'Kies een foto en een geldige actie.'},400);
- const [rows]=await env.DB.batch([env.DB.prepare("SELECT * FROM photo_submissions WHERE object_key = ? AND status = 'pending'").bind(body.key)]);const row=rows.results[0];if(!row)return featureJson({error:'Deze foto is al beoordeeld.'},409);
- if(body.action==='approve')await env.DB.batch([env.DB.prepare("INSERT INTO teacher_photos (name_key, object_key, owner_hash, uploaded_at) SELECT name_key, object_key, owner_hash, uploaded_at FROM photo_submissions WHERE object_key = ? AND status = 'pending' ON CONFLICT(name_key) DO UPDATE SET object_key = excluded.object_key, owner_hash = excluded.owner_hash, uploaded_at = excluded.uploaded_at").bind(body.key),env.DB.prepare("UPDATE photo_submissions SET status = 'approved' WHERE object_key = ? AND status = 'pending'").bind(body.key)]);
- else await env.DB.batch([env.DB.prepare("UPDATE photo_submissions SET status = 'rejected' WHERE object_key = ? AND status = 'pending'").bind(body.key)]);
- return featureJson({reviewed:true,pendingPhotos:await moderationState(env)});
-}
+export async function classTeachers(db,classId){const [rows]=await db.batch([db.prepare('SELECT teacher_names FROM class_settings WHERE class_id = ?').bind(classId)]);return rows.results[0]?JSON.parse(rows.results[0].teacher_names):classId===DEFAULT_CLASS?DEFAULT_TEACHER_NAMES:null;}
 function memberCookie(request){return request.headers.get('cookie')?.split(';').map(s=>s.trim()).find(s=>s.startsWith('docente_member='))?.slice(15)||'';}
 export async function memberAccount(request,env,date){const token=memberCookie(request);if(!/^[a-f0-9]{64}$/.test(token))return null;const [rows]=await env.DB.batch([env.DB.prepare('SELECT a.id, a.email FROM member_sessions s JOIN member_accounts a ON a.id = s.account_id WHERE s.token_hash = ? AND s.expires_at > ?').bind(await digest(token),Math.floor(date.getTime()/1000))]);return rows.results[0]||null;}
 export async function handleMember(request,env,date){
@@ -27,7 +20,7 @@ export async function handleMember(request,env,date){
  if(path==='/api/account/state'&&request.method==='GET')return featureJson({authenticated:!!account,...(account?{email:account.email}:{})});
  if(path==='/api/account/tierlist'&&request.method==='GET'){
   if(!account)return featureJson({error:'Log eerst in.'},401);const classId=url.searchParams.get('classId');if(!CLASS_IDS.includes(classId))return featureJson({error:'Onbekende klas.'},400);
-  const [rows]=await env.DB.batch([env.DB.prepare('SELECT ranking FROM saved_tierlists WHERE account_id = ? AND school_year = ? AND class_id = ?').bind(account.id,env.YEAR.year,classId)]);return featureJson({ranking:rows.results[0]?JSON.parse(rows.results[0].ranking):null});
+  const [rows]=await env.DB.batch([env.DB.prepare('SELECT ranking, teacher_names FROM saved_tierlists WHERE account_id = ? AND school_year = ? AND class_id = ?').bind(account.id,env.YEAR.year,classId)]);const saved=rows.results[0],names=await classTeachers(env.DB,classId);const outdated=!!saved&&!!saved.teacher_names&&saved.teacher_names!==JSON.stringify(names);return featureJson({ranking:saved&&!outdated?JSON.parse(saved.ranking):null,outdated});
  }
  if(request.method!=='POST')return featureJson({error:'Gebruik POST.'},405);
  if(request.headers.get('origin')!==url.origin||request.headers.get('sec-fetch-site')==='cross-site')return featureJson({error:'Onjuiste herkomst.'},403);
@@ -48,9 +41,12 @@ export async function handleMember(request,env,date){
  if(path==='/api/account/logout'){await env.DB.batch([env.DB.prepare('DELETE FROM member_sessions WHERE token_hash = ?').bind(await digest(memberCookie(request)))]);return featureJson({authenticated:false},200,{'Set-Cookie':cookie('',0)});}
  if(!account)return featureJson({error:'Log eerst in.'},401);
  if(path==='/api/account/tierlist'){
-  const ranks=body.ranking;if(Object.keys(body).some(k=>!['classId','ranking'].includes(k))||!CLASS_IDS.includes(body.classId)||!Array.isArray(ranks)||ranks.length!==7||new Set(ranks.map(r=>r?.teacherId)).size!==7||ranks.some(r=>!r||!Number.isInteger(r.teacherId)||r.teacherId<1||r.teacherId>7||!['S','A','B','C','D','F','unranked'].includes(r.tier)||Object.keys(r).some(k=>!['teacherId','tier'].includes(k))))return featureJson({error:'Ongeldige tierlist.'},400);
+  if(!CLASS_IDS.includes(body.classId))return featureJson({error:'Onbekende klas.'},400);
+  const names=await classTeachers(env.DB,body.classId);if(!names)return featureJson({error:'Stel eerst de docenten van deze klas in.'},409);
+  const ranks=body.ranking;if(Object.keys(body).some(k=>!['classId','ranking'].includes(k))||!Array.isArray(ranks)||ranks.length!==names.length||new Set(ranks.map(r=>r?.teacherId)).size!==names.length||ranks.some(r=>!r||!Number.isInteger(r.teacherId)||r.teacherId<1||r.teacherId>names.length||!['S','A','B','C','D','F','unranked'].includes(r.tier)||Object.keys(r).some(k=>!['teacherId','tier'].includes(k))))return featureJson({error:'Ongeldige tierlist.'},400);
   if(env.YEAR.archived)return featureJson({error:'Dit schooljaar is gearchiveerd.'},409);
-  await env.DB.batch([env.DB.prepare('INSERT INTO saved_tierlists (account_id, school_year, class_id, ranking) VALUES (?, ?, ?, ?) ON CONFLICT(account_id, school_year, class_id) DO UPDATE SET ranking = excluded.ranking').bind(account.id,env.YEAR.year,body.classId,JSON.stringify(ranks))]);return featureJson({saved:true});
+  if(ranks.filter(row=>row.tier==='S').length>1)return featureJson({error:'Je kunt maximaal één docent S geven.'},400);
+  await env.DB.batch([env.DB.prepare('INSERT INTO saved_tierlists (account_id, school_year, class_id, ranking, teacher_names) VALUES (?, ?, ?, ?, ?) ON CONFLICT(account_id, school_year, class_id) DO UPDATE SET ranking = excluded.ranking, teacher_names = excluded.teacher_names').bind(account.id,env.YEAR.year,body.classId,JSON.stringify(ranks),JSON.stringify(names))]);return featureJson({saved:true});
  }
  return featureJson({error:'Onbekende accountactie.'},404);
 }

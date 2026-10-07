@@ -13,14 +13,16 @@ Read `HANDOFF.md` for the product decisions and hosting context before changing 
 
 ## Preserve user data and behavior
 
-- Tiers are S, A, B, C, D and F. Do not restore E.
+- Tiers are S, A, B, C, D and F. Do not restore E. New rankings and saved drafts may contain at most one S. Preserve historical ballots; loading old drafts returns extra S-docents to unranked.
+- Docentduels use a separate activity tab above the class content. Keep them out of the Tierlist panel.
 - Use `public/classes.js` as the shared class list. Existing internal ITF IDs must remain stable so saved ballots, class names and reset rounds stay associated.
-- Preserve separate class rankings and shared teacher identities in the overall ranking and photo storage.
+- Classes have 1–30 unique teachers. Validate ballots, favorites, duels and account drafts against the actual class list. Public setup is one-time; changing existing names requires admin authentication and starts a new class round. Preserve old drafts with their teacher-name snapshot so old positions never transfer to different teachers.
+- Preserve separate class rankings and shared teacher identities in the overall ranking.
 - Resetting a ranking starts a new round. Do not delete historical votes to implement a reset.
 - Applied Drizzle migrations are immutable. Append a migration for schema changes and preserve the journal and snapshots.
-- Public visitors must not gain admin reset access or overwrite another uploader's photo.
+- Public visitors must not gain admin reset access.
 - School-year storage in `worker/features.js` keeps 2026-2027 class IDs unchanged and prefixes later stored IDs with `YEAR:`. API IDs remain stable. Use the scoped DB for vote/class queries; keep member tierlists explicitly keyed by school year. Archived years reject public writes and admin resets.
-- New photos enter `photo_submissions`; only approved `teacher_photos` are public. Do not make pending photo URLs publicly accessible.
+- Teacher photos and uploads were removed. Do not restore photo UI or routes. Preserve existing photo tables, immutable migrations and storage bindings without exposing stored files.
 - Member accounts only save drafts. Loading/saving drafts must not cast a vote or give admin access.
 
 ## Production publishing

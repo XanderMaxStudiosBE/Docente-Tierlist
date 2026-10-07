@@ -4,7 +4,7 @@ import {createWorker,ACTIVE_ROUND} from '../worker/index.js';
 import {digest} from '../worker/admin.js';
 import {localDatabase} from './local-db.mjs';
 const origin='https://ranking.test';const worker=createWorker({});const setupToken='test-only-setup-token';const email='admin@example.test',password='Only-for-local-tests-2026';
-const ranks=tier=>Array.from({length:7},(_,i)=>({teacherId:i+1,tier}));
+const ranks=tier=>Array.from({length:7},(_,i)=>({teacherId:i+1,tier:tier==='S'&&i>0?'A':tier}));
 async function envForTest(){return {DB:localDatabase(),ADMIN_SETUP_HASH:await digest(setupToken)};}
 async function post(env,path,body,cookie='',token='',requestOrigin=origin){return worker.fetch(new Request(origin+path,{method:'POST',headers:{origin:requestOrigin,'content-type':'application/json',...(cookie?{cookie}:{}),...(token?{Authorization:'Bearer '+token}:{})},body:JSON.stringify(body)}),env);}
 async function person(env,classId='1ITF04'){const response=await worker.fetch(new Request(origin+'/api/results?classId='+classId),env);return {cookie:response.headers.get('set-cookie').split(';')[0],data:await response.json()};}
@@ -42,20 +42,23 @@ test('Reset isolates one class, rejects old open ballots, updates overall and ca
  }finally{env.DB.close();}
 });
 test('Login attempts are limited',async()=>{const env=await envForTest();try{await setup(env);for(let i=0;i<7;i++)assert.equal((await post(env,'/api/admin/login',{email,password:'wrong'})).status,401);assert.equal((await post(env,'/api/admin/login',{email,password})).status,429);}finally{env.DB.close();}});
-function memoryPhotos(){const files=new Map();return {files,async put(key,bytes,options){files.set(key,{body:new Uint8Array(bytes),httpMetadata:options.httpMetadata});},async get(key){return files.get(key)||null;},async delete(key){files.delete(key);}};}
-const png=Uint8Array.from(Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=','base64'));
-async function photo(env,cookie,bytes=png,type='image/png',classId='1ITF04'){const form=new FormData();form.set('classId',classId);form.set('teacherId','1');form.set('photo',new Blob([bytes],{type}),'photo.png');return worker.fetch(new Request(origin+'/api/photos',{method:'POST',headers:{origin,cookie},body:form}),env);}
-test('Photos persist, share by teacher name, reject spoofed files and enforce uploader ownership',async()=>{
- const env=await envForTest();env.PHOTOS=memoryPhotos();try{
-  const p=await person(env),other=await person(env);
-  assert.equal((await photo(env,p.cookie,new TextEncoder().encode('<html>not a photo</html>'))).status,415);
-  let response=await photo(env,p.cookie);assert.equal(response.status,200);assert.equal((await response.json()).pending,true);const admin=await setup(env);let state=await (await worker.fetch(new Request(origin+'/api/admin/state',{headers:{cookie:admin}}),env)).json();const saved={url:state.pendingPhotos[0].url};assert.equal((await worker.fetch(new Request(origin+saved.url),env)).status,404);assert.equal((await post(env,'/api/admin/photos',{key:state.pendingPhotos[0].key,action:'approve'},admin)).status,200);assert.equal(env.PHOTOS.files.size,1);
-  response=await worker.fetch(new Request(origin+saved.url),env);assert.equal(response.status,200);assert.equal(response.headers.get('content-type'),'image/png');assert.equal(response.headers.get('x-content-type-options'),'nosniff');assert.deepEqual(new Uint8Array(await response.arrayBuffer()),png);
-  assert.equal((await photo(env,other.cookie)).status,403);
-  assert.equal((await photo(env,p.cookie,new Uint8Array(3*1024*1024+1))).status,413);
-  await post(env,'/api/classes',{classId:'1ITF01',teacherNames:['Lena Dillien','Docent twee','Docent drie','Docent vier','Docent vijf','Docent zes','Docent zeven']},p.cookie);
-  let data=await (await worker.fetch(new Request(origin+'/api/results?classId=1ITF01',{headers:{cookie:p.cookie}}),env)).json();assert.equal(data.photos[0].url,saved.url);assert.equal(data.photos[0].canReplace,true);
-  await post(env,'/api/admin/reset',{classId:'all',confirm:'RESET'},admin);data=await (await worker.fetch(new Request(origin+'/api/results',{headers:{cookie:p.cookie}}),env)).json();assert.equal(data.photos[0].url,saved.url);
-  response=await photo(env,other.cookie+'; '+admin);assert.equal(response.status,200);assert.equal(env.PHOTOS.files.size,2);assert.equal((await response.json()).pending,true);state=await (await worker.fetch(new Request(origin+'/api/admin/state',{headers:{cookie:admin}}),env)).json();const next=state.pendingPhotos[0];assert.notEqual(next.url,saved.url);await post(env,'/api/admin/photos',{key:next.key,action:'reject'},admin);data=await (await worker.fetch(new Request(origin+'/api/results',{headers:{cookie:p.cookie}}),env)).json();assert.equal(data.photos[0].url,saved.url);assert.equal((await worker.fetch(new Request(origin+next.url),env)).status,404);
+test('Removed photo routes cannot expose files or accept uploads, and existing data remains intact',async()=>{
+ const env=await envForTest();
+ const key='11111111-1111-4111-8111-111111111111';
+ env.PHOTOS={get(){throw new Error('Photo storage must not be accessed');},put(){throw new Error('Photo storage must not be modified');},delete(){throw new Error('Photo storage must not be deleted');}};
+ try{
+  await env.DB.batch([env.DB.prepare('INSERT INTO teacher_photos (name_key, object_key, owner_hash, uploaded_at) VALUES (?, ?, ?, ?)').bind('lena dillien',key,'old-owner',1)]);
+  const p=await person(env),admin=await setup(env);
+  for(const cookie of ['',p.cookie,admin]){
+   assert.equal((await worker.fetch(new Request(origin+'/photos/'+key,{headers:{cookie}}),env)).status,404);
+   assert.equal((await post(env,'/api/photos',{},cookie)).status,404);
+   assert.equal((await post(env,'/api/admin/photos',{key,action:'approve'},cookie)).status,404);
+  }
+  assert.equal(Object.hasOwn(p.data,'photos'),false);
+  const state=await (await worker.fetch(new Request(origin+'/api/admin/state',{headers:{cookie:admin}}),env)).json();
+  assert.equal(Object.hasOwn(state,'pendingPhotos'),false);
+  const [stored]=await env.DB.batch([env.DB.prepare('SELECT object_key FROM teacher_photos')]);assert.equal(stored.results[0].object_key,key);
+  const vote=await post(env,'/api/votes',{rankings:ranks('S'),roundId:p.data.roundId},p.cookie);assert.equal(vote.status,200);
+  assert.ok((await vote.json()).teachers.every(t=>t.counts[t.id===1?'S':'A']===1));
  }finally{env.DB.close();}
 });

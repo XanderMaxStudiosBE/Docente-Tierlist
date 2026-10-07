@@ -1,5 +1,5 @@
-import {moderationState,moderatePhoto,yearsState} from './features.js';
-import {DEFAULT_CLASS,resolveClass} from '../public/classes.js';
+import {yearsState,classTeachers} from './features.js';
+import {DEFAULT_CLASS,DEFAULT_TEACHER_NAMES,validTeacherNames,resolveClass} from '../public/classes.js';
 const adminCookieName='docente_admin';
 const authJson=(data,status=200,headers={})=>Response.json(data,{status,headers:{'Cache-Control':'no-store',...headers}});
 const hex=bytes=>Array.from(new Uint8Array(bytes),b=>b.toString(16).padStart(2,'0')).join('');
@@ -11,17 +11,17 @@ function cookieValue(request){return request.headers.get('cookie')?.split(';').m
 function authCookie(request,token,maxAge=86400){return `${adminCookieName}=${token}; Path=/; HttpOnly; SameSite=Strict; Max-Age=${maxAge}${new URL(request.url).protocol==='https:'?'; Secure':''}`;}
 export async function activeRounds(db,classes,initialRound){const [rows]=await db.batch([db.prepare('SELECT class_id, round_id FROM class_rounds')]);return new Map(classes.map(id=>[id,rows.results.find(r=>r.class_id===id)?.round_id||initialRound]));}
 export async function authenticated(request,env,now){const token=cookieValue(request);if(!/^[a-f0-9]{64}$/.test(token))return false;const [sessions]=await env.DB.batch([env.DB.prepare('SELECT expires_at FROM admin_sessions WHERE token_hash = ? AND expires_at > ?').bind(await digest(token),Math.floor(now.getTime()/1000))]);return sessions.results.length===1;}
-async function summary(env,date,classes,initialRound){const rounds=await activeRounds(env.DB,classes,initialRound);const [settings,counts,duels]=await env.DB.batch([env.DB.prepare('SELECT class_id FROM class_settings'),env.DB.prepare('SELECT class_id, round_id, COUNT(DISTINCT voter_id) AS count FROM votes GROUP BY class_id, round_id'),env.DB.prepare('SELECT class_id, round_id, COUNT(*) AS count FROM duels GROUP BY class_id, round_id')]);return classes.map(classId=>({classId,configured:classId===DEFAULT_CLASS||settings.results.some(r=>r.class_id===classId),votes:counts.results.find(r=>r.class_id===classId&&r.round_id===rounds.get(classId))?.count||0,duels:duels.results.find(r=>r.class_id===classId&&r.round_id===rounds.get(classId))?.count||0}));}
+async function summary(env,date,classes,initialRound){const rounds=await activeRounds(env.DB,classes,initialRound);const [settings,counts,duels]=await env.DB.batch([env.DB.prepare('SELECT class_id, teacher_names FROM class_settings'),env.DB.prepare('SELECT class_id, round_id, COUNT(DISTINCT voter_id) AS count FROM votes GROUP BY class_id, round_id'),env.DB.prepare('SELECT class_id, round_id, COUNT(*) AS count FROM duels GROUP BY class_id, round_id')]);return classes.map(classId=>{const saved=settings.results.find(r=>r.class_id===classId),teacherNames=saved?JSON.parse(saved.teacher_names):classId===DEFAULT_CLASS?DEFAULT_TEACHER_NAMES:null;return {classId,teacherNames,teacherCount:teacherNames?.length||0,roundId:rounds.get(classId),configured:!!teacherNames,votes:counts.results.find(r=>r.class_id===classId&&r.round_id===rounds.get(classId))?.count||0,duels:duels.results.find(r=>r.class_id===classId&&r.round_id===rounds.get(classId))?.count||0};});}
 export async function handleAdmin(request,env,date,classes,initialRound){
   const url=new URL(request.url);const db=env.DB;if(!db)return authJson({error:'Adminopslag tijdelijk niet beschikbaar.'},503);
   try{
     const [accountResult]=await db.batch([db.prepare('SELECT email, password_hash, salt FROM admin_account WHERE id = 1')]);const account=accountResult.results[0];
     const signedIn=await authenticated(request,env,date);
-    if(url.pathname==='/api/admin/state' && request.method==='GET')return authJson({configured:!!account,authenticated:signedIn,...(signedIn?{email:account.email,classes:await summary(env,date,classes,initialRound),...env.YEAR,pendingPhotos:await moderationState(env)}:{})});
+    if(url.pathname==='/api/admin/state' && request.method==='GET')return authJson({configured:!!account,authenticated:signedIn,...(signedIn?{email:account.email,classes:await summary(env,date,classes,initialRound),...env.YEAR}:{})});
     if(request.method!=='POST')return authJson({error:'Gebruik POST.'},405,{Allow:'POST'});
     if(request.headers.get('origin')!==url.origin || request.headers.get('sec-fetch-site')==='cross-site')return authJson({error:'Onjuiste herkomst.'},403);
     if(!(request.headers.get('content-type')||'').startsWith('application/json'))return authJson({error:'Gebruik JSON.'},415);
-    const raw=await request.text();if(raw.length>2048)return authJson({error:'Invoer te groot.'},413);let body;try{body=JSON.parse(raw);}catch{return authJson({error:'Onjuiste invoer.'},400);}if(!body||typeof body!=='object'||Array.isArray(body))return authJson({error:'Onjuiste invoer.'},400);
+    const raw=await request.text();if(raw.length>8192)return authJson({error:'Invoer te groot.'},413);let body;try{body=JSON.parse(raw);}catch{return authJson({error:'Onjuiste invoer.'},400);}if(!body||typeof body!=='object'||Array.isArray(body))return authJson({error:'Onjuiste invoer.'},400);
     const seconds=Math.floor(date.getTime()/1000);
     if(url.pathname==='/api/admin/setup' || url.pathname==='/api/admin/login'){
       const setup=url.pathname.endsWith('/setup');
@@ -38,7 +38,25 @@ export async function handleAdmin(request,env,date,classes,initialRound){
     }
     if(url.pathname==='/api/admin/logout'){const token=cookieValue(request);if(token)await db.batch([db.prepare('DELETE FROM admin_sessions WHERE token_hash = ?').bind(await digest(token))]);return authJson({authenticated:false},200,{'Set-Cookie':authCookie(request,'',0)});}
     if(!signedIn)return authJson({error:'Log eerst in als admin.'},401);
-    if(url.pathname==='/api/admin/photos')return moderatePhoto(env,body,date);
+    if(url.pathname==='/api/admin/teachers'){
+      if(env.YEAR.archived)return authJson({error:'De docenten van een gearchiveerd schooljaar kunnen niet worden gewijzigd.'},409);
+      const classId=resolveClass(body.classId);
+      if(!classId||Object.keys(body).some(k=>!['classId','teacherNames','roundId','confirm'].includes(k))||body.confirm!=='UPDATE_TEACHERS'||!validTeacherNames(body.teacherNames))return authJson({error:'Kies 1 tot 30 verschillende docentnamen en bevestig de nieuwe stemronde.'},400);
+      const current=(await activeRounds(db,classes,initialRound)).get(classId);
+      if(body.roundId!==current)return authJson({error:'De klas is intussen gewijzigd. Vernieuw het adminpaneel.'},409);
+      const oldNames=await classTeachers(db,classId),names=body.teacherNames.map(n=>n.normalize('NFC').trim().replace(/\s+/g,' '));
+      if(JSON.stringify(oldNames)===JSON.stringify(names))return authJson({updated:false,classes:await summary(env,date,classes,initialRound)});
+      const round='round-'+crypto.randomUUID();
+      // The round guard prevents an older admin form from overwriting a newer edit.
+      const guard='? = COALESCE((SELECT round_id FROM class_rounds WHERE class_id = ?), ?)';
+      await db.batch([
+        db.prepare('UPDATE saved_tierlists SET teacher_names = ? WHERE school_year = ? AND class_id = ? AND teacher_names IS NULL').bind(JSON.stringify(oldNames),env.YEAR.year,classId),
+        db.prepare(`INSERT INTO class_settings (class_id, teacher_names) SELECT ?, ? WHERE ${guard} ON CONFLICT(class_id) DO UPDATE SET teacher_names = excluded.teacher_names`).bind(classId,JSON.stringify(names),current,classId,initialRound),
+        db.prepare(`INSERT INTO class_rounds (class_id, round_id) SELECT ?, ? WHERE ${guard} ON CONFLICT(class_id) DO UPDATE SET round_id = excluded.round_id`).bind(classId,round,current,classId,initialRound),
+      ]);
+      if((await activeRounds(db,classes,initialRound)).get(classId)!==round)return authJson({error:'De klas is intussen gewijzigd. Vernieuw het adminpaneel.'},409);
+      return authJson({updated:true,classes:await summary(env,date,classes,initialRound)});
+    }
     if(url.pathname==='/api/admin/year'){
       if(Object.keys(body).some(k=>k!=='confirm')||body.confirm!=='NEW_YEAR')return authJson({error:'Bevestig het nieuwe schooljaar.'},400);
       const state=await yearsState(env.RAW_DB);const start=Number(state.currentYear.slice(0,4))+1;const year=start+'-'+(start+1);

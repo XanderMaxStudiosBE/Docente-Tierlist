@@ -1,4 +1,7 @@
-// Keep the existing ITF IDs so saved rankings, photos and reset rounds stay linked.
+export const MAX_TEACHERS=30;
+export const DEFAULT_TEACHER_NAMES=['Lena Dillien','Brent Pulmans','Michaël Cloots','Natalie Smets','Bart Portier','Stef Adriaansen','Stef Van Wolputte'];
+export function validTeacherNames(names){return Array.isArray(names)&&names.length>=1&&names.length<=MAX_TEACHERS&&names.every(name=>typeof name==='string'&&name.trim().length>=1&&name.trim().length<=50)&&new Set(names.map(name=>name.normalize('NFC').trim().replace(/\s+/g,' ').toLocaleLowerCase('nl-BE'))).size===names.length;}
+// Keep the existing ITF IDs so saved rankings and reset rounds stay linked.
 export const CLASS_GROUPS = [
   {label:'1e jaar',classes:[
     {id:'1ITF01',label:'1itf1'},{id:'1ITF02',label:'1itf2'},
