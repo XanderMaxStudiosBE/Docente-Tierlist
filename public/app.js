@@ -16,6 +16,7 @@ const requestedClass=new URLSearchParams(location.search).get('klas');
 let activeClass=resolveClass(requestedClass)||resolveClass(preferredClass)||DEFAULT_CLASS;
 let classConfigured=activeClass===DEFAULT_CLASS;
 let resultScope='class';
+const activityViews=['tierlist','duels','favorites','feedback'];
 let activeView='tierlist';
 let savingNames=false;
 const classDrafts=new Map();
@@ -71,7 +72,7 @@ $('#native-share').addEventListener('click',shareWebsite);
 $('#close-share').addEventListener('click',()=>$('#share-dialog').close());
 $('#copy-share-link').addEventListener('click',copyWebsiteLink);
 $('#share-link').addEventListener('click',()=>$('#share-link').select());
-const latestUpdate='2026-10-07-docentklachten';
+const latestUpdate='2026-10-07-header-favorieten';
 let seenUpdate='';try{seenUpdate=localStorage.getItem('docente_changelog_seen')||'';}catch{}
 function renderUpdateBadge(){const unread=seenUpdate!==latestUpdate;$('#updates-badge').hidden=!unread;$('#open-updates').setAttribute('aria-label',unread?'Updates bekijken, nieuwe updates':'Updates bekijken');}
 $('#open-updates').addEventListener('click',()=>{$('#updates-dialog').showModal();seenUpdate=latestUpdate;try{localStorage.setItem('docente_changelog_seen',latestUpdate);}catch{}renderUpdateBadge();});
@@ -86,8 +87,9 @@ function renderClassControls(){
   $('#ranking-main').hidden=welcomeRequired;$('#welcome-screen').hidden=!welcomeRequired;$('#open-account').hidden=welcomeRequired;
   $('#tierlist-view').hidden=!classConfigured||activeView!=='tierlist';
   $('#duels-view').hidden=!classConfigured||activeView!=='duels';
+  $('#favorites-view').hidden=!classConfigured||activeView!=='favorites';
   $('#feedback-view').hidden=activeView!=='feedback';feedbackDesk.updateContext();
-  for(const view of ['tierlist','duels','feedback']){const tab=$('#tab-'+view);tab.setAttribute('aria-selected',String(activeView===view));tab.tabIndex=activeView===view||(!classConfigured&&view==='feedback')?0:-1;tab.disabled=view!=='feedback'&&!classConfigured;}
+  for(const view of activityViews){const tab=$('#tab-'+view);tab.setAttribute('aria-selected',String(activeView===view));tab.tabIndex=activeView===view||(!classConfigured&&view==='feedback')?0:-1;tab.disabled=view!=='feedback'&&!classConfigured;}
   $('#class-select').value=activeClass;$('#class-select').disabled=busy;
   $('#current-class').textContent=classLabel(activeClass);
   $('#class-setup').hidden=classConfigured||activeView==='feedback';
@@ -406,9 +408,9 @@ $('#scope-overall').addEventListener('click',()=>selectScope('overall'));
 ['#scope-class','#scope-overall'].forEach(selector=>$(selector).addEventListener('keydown',event=>{if(!['ArrowLeft','ArrowRight','Home','End'].includes(event.key))return;event.preventDefault();const scope=event.key==='Home'?'class':event.key==='End'?'overall':resultScope==='class'?'overall':'class';selectScope(scope);$('#scope-'+scope).focus();}));
 render();
 function selectView(view){activeView=view;renderClassControls();if(view==='feedback')feedbackDesk.refresh();}
-for(const view of ['tierlist','duels','feedback']){
+for(const view of activityViews){
   const tab=$('#tab-'+view);tab.addEventListener('click',()=>selectView(view));
-  tab.addEventListener('keydown',event=>{if(!['ArrowLeft','ArrowRight','Home','End'].includes(event.key))return;event.preventDefault();const views=classConfigured?['tierlist','duels','feedback']:['feedback'];const index=views.indexOf(activeView);const next=event.key==='Home'?views[0]:event.key==='End'?views.at(-1):views[(index+(event.key==='ArrowRight'?1:views.length-1))%views.length];selectView(next);$('#tab-'+next).focus();});
+  tab.addEventListener('keydown',event=>{if(!['ArrowLeft','ArrowRight','Home','End'].includes(event.key))return;event.preventDefault();const views=classConfigured?activityViews:['feedback'];const index=views.indexOf(activeView);const next=event.key==='Home'?views[0]:event.key==='End'?views.at(-1):views[(index+(event.key==='ArrowRight'?1:views.length-1))%views.length];selectView(next);$('#tab-'+next).focus();});
 }
 $('#submit-vote').addEventListener('click',submitVote);
 $('#refresh-results').addEventListener('click',()=>fetchResults());

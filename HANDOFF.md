@@ -48,7 +48,7 @@ Controle op 7 oktober 2026 om 16:43 Belgische tijd: domeinstatus, provider_statu
 
 ## Toegevoegde functies op 7 oktober 2026
 
-Nieuwe bezoekers kiezen hun klas op het beginscherm. Alleen deze apparaatvoorkeur wordt in localStorage onthouden. Elke klas heeft een aparte favoriete-docentstem per browser en stemronde; de uitslag blijft blind totdat de tierlist is ingestuurd.
+Nieuwe bezoekers kiezen hun klas op het beginscherm. Alleen deze apparaatvoorkeur wordt in localStorage onthouden. Elke klas heeft een aparte favoriete-docentstem per browser en stemronde; de uitslag blijft blind totdat de tierlist is ingestuurd. De keuze en publieksprijs staan uitsluitend in de activiteitstab Favoriete docent, direct naast Docentduels. Alle activiteitstabs ondersteunen pijltjestoetsen, Home en End.
 
 De knop Delen rechtsboven is ook op het beginscherm beschikbaar. Hij opent een venster met Link kopiëren en, waar ondersteund, Via app delen voor het native deelmenu. Deel alleen de publieke hoofddomeinlink https://docente-ranking-thomasmoregeel.eu/, zonder account-, ranking- of URL-gegevens van de bezoeker.
 
@@ -65,7 +65,7 @@ De gebruiker wil de ontwikkeling en deze conversatie verderzetten via GitHub en 
 
 De Feedback-tab bevat suggesties, klachten en bugtickets over de website. Tickets vereisen een ingelogd memberaccount en zijn alleen toegankelijk voor de indiener en ingelogde admins. Admins lezen tickets van alle klassen en schooljaren, antwoorden en zetten de status op open, in behandeling of afgesloten. Gesprekken blijven behouden bij schooljaarwissels en rankingresets. Nieuwe migratie 0008 voegt uitsluitend support_tickets en ticket_messages toe. worker/tickets.js gebruikt de raw database omdat tickets appbreed zijn. Writes vereisen dezelfde origin; ticketcreatie en antwoorden hebben accountlimieten en revisions voorkomen dubbele replies bij conflicten. E-mail en account-id worden niet in ticketresponses meegestuurd.
 
-De testsuite bevat nu 27 tests. Het favicon is de door de gebruiker aangeleverde afbeelding, als 64×64 PNG in public/favicon.png. De bouw en preview nemen dit als binary asset op; beide pagina's linken hetzelfde favicon.
+De testsuite bevat nu 27 tests. Het favicon is de door de gebruiker aangeleverde afbeelding, als 64×64 PNG in public/favicon.png. De bouw en preview nemen dit als binary asset op; beide pagina's linken hetzelfde favicon en gebruiken dit ook als logo in de header.
 
 Bij het insturen van een ranking door een ingelogde member slaat de server dezelfde tierlist en docentnamen atomair met de stemmen in het account op. De sleutel blijft account, schooljaar en klas; een gast kan gewoon anoniem stemmen. Alleen een ontwerp handmatig opslaan of laden brengt geen stem uit.
 
