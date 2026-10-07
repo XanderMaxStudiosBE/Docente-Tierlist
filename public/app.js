@@ -1,4 +1,5 @@
 import {CLASS_GROUPS,CLASS_IDS,DEFAULT_CLASS,DEFAULT_TEACHER_NAMES,MAX_TEACHERS,validTeacherNames,classLabel,resolveClass} from './classes.js';
+import {createTicketDesk} from './tickets.js';
 'use strict';
 const tiers = ['S','A','B','C','D','F'];
 const tierColors = ['#f58e98','#f3ac83','#f1cf7b','#d7e888','#99d6b7','#bcaaeb'];
@@ -33,6 +34,9 @@ let sendingDuel=false;
 let duelIndex=0;
 let pairs=teachers.flatMap(a=>teachers.filter(b=>b.id>a.id).map(b=>({leftId:a.id,rightId:b.id})));
 const $ = selector=>document.querySelector(selector);
+const feedbackDesk=createTicketDesk({root:$('#feedback-view'),getContext:()=>({classId:activeClass,year:selectedYear}),onLogin:()=>$('#account-dialog').showModal(),onAuthExpired:()=>{accountState={authenticated:false};renderAccount();},request:async(path,body)=>{
+  const response=await siteFetch(path,{method:body===undefined?'GET':'POST',credentials:'same-origin',...(body===undefined?{}:{headers:{'Content-Type':'application/json'},body:JSON.stringify(body)})});const data=await response.json();if(!response.ok){const error=new Error(data.error||'Ticketactie mislukt.');error.status=response.status;throw error;}return data;
+}});
 const grip = '<svg class="grip" viewBox="0 0 12 18" aria-hidden="true" fill="currentColor" stroke="none"><circle cx="3" cy="4" r="1"/><circle cx="9" cy="4" r="1"/><circle cx="3" cy="9" r="1"/><circle cx="9" cy="9" r="1"/><circle cx="3" cy="14" r="1"/><circle cx="9" cy="14" r="1"/></svg>';
 function announce(message){$('#announcement').textContent=message;}
 function notify(message){const toast=$('#toast');toast.textContent=message;toast.hidden=false;clearTimeout(toastTimer);toastTimer=setTimeout(()=>{toast.hidden=true;},2600);}
@@ -67,7 +71,7 @@ $('#native-share').addEventListener('click',shareWebsite);
 $('#close-share').addEventListener('click',()=>$('#share-dialog').close());
 $('#copy-share-link').addEventListener('click',copyWebsiteLink);
 $('#share-link').addEventListener('click',()=>$('#share-link').select());
-const latestUpdate='2026-10-07-flexible-classes';
+const latestUpdate='2026-10-07-feedback-tickets';
 let seenUpdate='';try{seenUpdate=localStorage.getItem('docente_changelog_seen')||'';}catch{}
 function renderUpdateBadge(){const unread=seenUpdate!==latestUpdate;$('#updates-badge').hidden=!unread;$('#open-updates').setAttribute('aria-label',unread?'Updates bekijken, nieuwe updates':'Updates bekijken');}
 $('#open-updates').addEventListener('click',()=>{$('#updates-dialog').showModal();seenUpdate=latestUpdate;try{localStorage.setItem('docente_changelog_seen',latestUpdate);}catch{}renderUpdateBadge();});
@@ -82,10 +86,11 @@ function renderClassControls(){
   $('#ranking-main').hidden=welcomeRequired;$('#welcome-screen').hidden=!welcomeRequired;$('#open-account').hidden=welcomeRequired;
   $('#tierlist-view').hidden=!classConfigured||activeView!=='tierlist';
   $('#duels-view').hidden=!classConfigured||activeView!=='duels';
-  for(const view of ['tierlist','duels']){const tab=$('#tab-'+view);tab.setAttribute('aria-selected',String(activeView===view));tab.tabIndex=activeView===view?0:-1;tab.disabled=!classConfigured;}
+  $('#feedback-view').hidden=activeView!=='feedback';feedbackDesk.updateContext();
+  for(const view of ['tierlist','duels','feedback']){const tab=$('#tab-'+view);tab.setAttribute('aria-selected',String(activeView===view));tab.tabIndex=activeView===view||(!classConfigured&&view==='feedback')?0:-1;tab.disabled=view!=='feedback'&&!classConfigured;}
   $('#class-select').value=activeClass;$('#class-select').disabled=busy;
   $('#current-class').textContent=classLabel(activeClass);
-  $('#class-setup').hidden=classConfigured;
+  $('#class-setup').hidden=classConfigured||activeView==='feedback';
   ['.intro','.workspace','.submit-bar','.results-section','#favorite-section','.account-tierlist'].forEach(s=>$(s).hidden=!classConfigured);
   $('#setup-heading').textContent='Docenten van '+classLabel(activeClass);
   $('#setup-teachers').disabled=archived||!votingReady || busy;
@@ -377,7 +382,9 @@ async function submitVote(){
   try{
     const response=await siteFetch('/api/votes',{method:'POST',headers:{'Content-Type':'application/json'},credentials:'same-origin',body:JSON.stringify({rankings:sent,roundId:currentRound,classId:activeClass})});
     const data=await response.json();refreshRound=response.status===409;if(!response.ok)throw new Error(data.error||'Je stem kon niet worden opgeslagen.');
-    submittedRanking=sent;resultData=data;renderResults();$('#results-status').textContent='Alle ingestuurde stemmen tellen mee.';notify('Je ranking is meegeteld.');announce('Je ranking is meegeteld in de percentages.');return {saved:true,results:data};
+    submittedRanking=sent;resultData=data;renderResults();$('#results-status').textContent='Alle ingestuurde stemmen tellen mee.';
+    $('#tierlist-status').textContent=data.accountSaved?'Tierlist automatisch bewaard in je account voor '+classLabel(activeClass)+' · '+selectedYear+'.':accountState.authenticated?'Ranking ingestuurd. Log opnieuw in en bewaar je tierlist om hem ook in je account op te slaan.':'Ranking ingestuurd. Met een account wordt je tierlist bij het insturen automatisch bewaard.';
+    const message=data.accountSaved?'Ranking ingestuurd en in je account bewaard.':'Je ranking is meegeteld.';notify(message);announce(message);return {saved:true,accountSaved:data.accountSaved,results:data};
   }catch(error){notify(error.message||'Versturen mislukt. Probeer opnieuw.');$('#results-status').textContent='Versturen mislukt. Je ranking blijft staan; probeer opnieuw.';return {saved:false,error:error.message};}
   finally{sendingVote=false;updateVotingControls();if(refreshRound)await fetchResults();}
 }
@@ -398,10 +405,10 @@ $('#scope-class').addEventListener('click',()=>selectScope('class'));
 $('#scope-overall').addEventListener('click',()=>selectScope('overall'));
 ['#scope-class','#scope-overall'].forEach(selector=>$(selector).addEventListener('keydown',event=>{if(!['ArrowLeft','ArrowRight','Home','End'].includes(event.key))return;event.preventDefault();const scope=event.key==='Home'?'class':event.key==='End'?'overall':resultScope==='class'?'overall':'class';selectScope(scope);$('#scope-'+scope).focus();}));
 render();
-function selectView(view){activeView=view;renderClassControls();}
-for(const view of ['tierlist','duels']){
+function selectView(view){activeView=view;renderClassControls();if(view==='feedback')feedbackDesk.refresh();}
+for(const view of ['tierlist','duels','feedback']){
   const tab=$('#tab-'+view);tab.addEventListener('click',()=>selectView(view));
-  tab.addEventListener('keydown',event=>{if(!['ArrowLeft','ArrowRight','Home','End'].includes(event.key))return;event.preventDefault();const next=event.key==='Home'?'tierlist':event.key==='End'?'duels':activeView==='tierlist'?'duels':'tierlist';selectView(next);$('#tab-'+next).focus();});
+  tab.addEventListener('keydown',event=>{if(!['ArrowLeft','ArrowRight','Home','End'].includes(event.key))return;event.preventDefault();const views=classConfigured?['tierlist','duels','feedback']:['feedback'];const index=views.indexOf(activeView);const next=event.key==='Home'?views[0]:event.key==='End'?views.at(-1):views[(index+(event.key==='ArrowRight'?1:views.length-1))%views.length];selectView(next);$('#tab-'+next).focus();});
 }
 $('#submit-vote').addEventListener('click',submitVote);
 $('#refresh-results').addEventListener('click',()=>fetchResults());
@@ -452,7 +459,7 @@ $('#favorite-form').addEventListener('submit',async e=>{e.preventDefault();if(fa
 $('#year-select').addEventListener('change',async()=>{selectedYear=$('#year-select').value;classDrafts.clear();currentRound=null;resultData=null;submittedRanking=null;teachers.forEach(t=>t.tier='unranked');history=[];duelIndex=0;const url=new URL(location.href);url.searchParams.set('jaar',selectedYear);window.history.replaceState(null,'',url);await fetchResults(true);});
 for(const group of CLASS_GROUPS){const section=element('section','welcome-group');section.append(element('h2','',group.label));const buttons=element('div','welcome-grid');for(const klass of group.classes){const button=element('button','welcome-class',klass.label);button.addEventListener('click',async()=>{welcomeRequired=false;try{localStorage.setItem('docente_class',klass.id);}catch{};if(activeClass===klass.id){renderClassControls();await fetchResults(true);}else await selectClass(klass.id);const url=new URL(location.href);url.searchParams.set('klas',klass.label);window.history.replaceState(null,'',url);});buttons.append(button);}section.append(buttons);$('#welcome-classes').append(section);}
 async function accountRequest(path,body){const response=await siteFetch('/api/account/'+path,{method:body===undefined?'GET':'POST',credentials:'same-origin',headers:body===undefined?{}:{'Content-Type':'application/json'},...(body===undefined?{}:{body:JSON.stringify(body)})});const data=await response.json();if(!response.ok)throw new Error(data.error||'Accountactie mislukt.');return data;}
-function renderAccount(){ $('#account-form').hidden=accountState.authenticated;$('#account-signed-in').hidden=!accountState.authenticated;$('#account-identity').textContent=accountState.email||'';$('#open-account').textContent=accountState.authenticated?'Mijn tierlists':'Inloggen';$('#save-tierlist').disabled=accountBusy||!votingReady||!!resultData?.archived;$('#load-tierlist').disabled=accountBusy||!votingReady;}
+function renderAccount(){ $('#account-form').hidden=accountState.authenticated;$('#account-signed-in').hidden=!accountState.authenticated;$('#account-identity').textContent=accountState.email||'';$('#open-account').textContent=accountState.authenticated?'Mijn tierlists':'Inloggen';$('#save-tierlist').disabled=accountBusy||!votingReady||!!resultData?.archived;$('#load-tierlist').disabled=accountBusy||!votingReady;feedbackDesk.setAccount(accountState);}
 $('#open-account').addEventListener('click',()=>{$('#account-dialog').showModal();});$('#close-account').addEventListener('click',()=>$('#account-dialog').close());
 async function authenticateMember(path){if(accountBusy)return;if(!$('#account-form').reportValidity())return;accountBusy=true;$('#account-status').textContent='Even wachten…';try{accountState=await accountRequest(path,{email:$('#account-email').value,password:$('#account-password').value});$('#account-password').value='';$('#account-status').textContent='Je bent ingelogd. Je kunt je tierlist nu bewaren.';renderAccount();}catch(error){$('#account-status').textContent=error.message;}finally{accountBusy=false;renderAccount();}}
 $('#account-form').addEventListener('submit',e=>{e.preventDefault();authenticateMember('login');});$('#register-account').addEventListener('click',()=>authenticateMember('register'));

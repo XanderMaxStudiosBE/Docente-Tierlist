@@ -1,4 +1,5 @@
-import {yearEnvironment,FIRST_YEAR,favoriteData,handleMember} from './features.js';
+import {yearEnvironment,FIRST_YEAR,favoriteData,handleMember,memberAccount} from './features.js';
+import {handleTickets} from './tickets.js';
 import {handleAdmin,activeRounds} from './admin.js';
 import {CLASS_IDS,DEFAULT_CLASS,DEFAULT_TEACHER_NAMES,validTeacherNames,resolveClass} from '../public/classes.js';
 const TIERS=['S','A','B','C','D','F'];
@@ -71,6 +72,7 @@ export function createWorker(assets,now=()=>new Date()){return {async fetch(requ
   if(url.pathname.startsWith('/photos/')||url.pathname==='/api/photos'||url.pathname==='/api/admin/photos')return new Response('Pagina niet gevonden',{status:404,headers:{'Cache-Control':'no-store'}});
   if(url.pathname.startsWith('/api/')){try{env=await yearEnvironment(request,env,ACTIVE_ROUND);}catch(error){return json({error:env.DB?error.message:'Stemmen tijdelijk niet beschikbaar.'},env.DB?400:503);}}
   if(url.pathname.startsWith('/api/account/')){try{return await handleMember(request,env,now());}catch(error){console.error('Account:',error.message);return json({error:'Account tijdelijk niet beschikbaar.'},503);}}
+  if(url.pathname==='/api/tickets'||url.pathname.startsWith('/api/tickets/')||url.pathname==='/api/admin/tickets'||url.pathname.startsWith('/api/admin/tickets/'))return handleTickets(request,env,now());
   if(url.pathname.startsWith('/api/admin/'))return handleAdmin(request,env,now(),CLASSES,env.YEAR.initialRound);
   if(['/api/results','/api/votes','/api/duels','/api/classes','/api/favorites'].includes(url.pathname)){
     try{
@@ -112,21 +114,25 @@ export function createWorker(assets,now=()=>new Date()){return {async fetch(requ
       if(!isDuel&&Array.isArray(body.rankings)&&body.rankings.filter(row=>row?.tier==='S').length>1)return json({error:'Je kunt maximaal één docent S geven.'},400);
       if(!(isDuel?validateDuel(body,teacherCount):validateRanking(body,teacherCount)))return json({error:isDuel?'Kies een docent uit een geldig duel.':'Plaats alle docenten van je klas in een geldige tier.'},400);
       if(body.roundId!==round)return json({error:'Er is een nieuwe stemronde gestart. Vernieuw de pagina en stuur je ranking opnieuw in.'},409);
+      let accountSaved=false;
       if(isDuel){
         await db.batch([db.prepare('INSERT INTO duels (voter_id, round_id, left_id, right_id, winner_id, class_id) VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(voter_id, round_id, left_id, right_id) DO UPDATE SET winner_id = excluded.winner_id').bind(hash,round,body.leftId,body.rightId,body.winnerId,classId)]);
       }else{
-        const week=weekStart(date);
-        await db.batch(body.rankings.flatMap(row=>[
+        const week=weekStart(date),account=await memberAccount(request,env,date);
+        const statements=body.rankings.flatMap(row=>[
           db.prepare('INSERT INTO votes (voter_id, teacher_id, tier, round_id, class_id) VALUES (?, ?, ?, ?, ?) ON CONFLICT(voter_id, teacher_id) DO UPDATE SET tier = excluded.tier, round_id = excluded.round_id').bind(hash,row.teacherId,row.tier,round,classId),
           db.prepare('INSERT INTO weekly_votes (voter_id, teacher_id, tier, round_id, week, class_id) VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(voter_id, teacher_id, round_id, week) DO UPDATE SET tier = excluded.tier').bind(hash,row.teacherId,row.tier,round,week,classId),
-        ]));
+        ]);
+        if(account)statements.push(db.prepare('INSERT INTO saved_tierlists (account_id, school_year, class_id, ranking, teacher_names) VALUES (?, ?, ?, ?, ?) ON CONFLICT(account_id, school_year, class_id) DO UPDATE SET ranking = excluded.ranking, teacher_names = excluded.teacher_names').bind(account.id,env.YEAR.year,classId,JSON.stringify(body.rankings),JSON.stringify(names.get(classId))));
+        await db.batch(statements);accountSaved=!!account;
       }
-      return json(await results(env,hash,date,classId));
+      return json({...await results(env,hash,date,classId),accountSaved});
     }catch(error){console.error('Stemmenopslag:',error);return json({error:'De stemmen zijn tijdelijk niet beschikbaar. Probeer opnieuw.'},503);}
   }
   if(request.method!=='GET' && request.method!=='HEAD')return new Response('Method not allowed',{status:405,headers:{Allow:'GET, HEAD'}});
   const path=url.pathname==='/'?'/index.html':['/admin','/admin/'].includes(url.pathname)?'/admin.html':url.pathname;
   if(!Object.hasOwn(assets,path))return new Response('Pagina niet gevonden',{status:404});
-  const type=path.endsWith('.css')?'text/css':path.endsWith('.js')?'application/javascript':'text/html';
-  return new Response(request.method==='HEAD'?null:assets[path],{headers:{'Content-Type':type+'; charset=utf-8','Cache-Control':'no-cache','X-Content-Type-Options':'nosniff','Referrer-Policy':'same-origin'}});
+  const asset=assets[path],binary=typeof asset==='object',type=binary?asset.type:path.endsWith('.css')?'text/css':path.endsWith('.js')?'application/javascript':'text/html';
+  const content=binary?Uint8Array.from(atob(asset.base64),char=>char.charCodeAt(0)):asset;
+  return new Response(request.method==='HEAD'?null:content,{headers:{'Content-Type':type+(binary?'':'; charset=utf-8'),'Cache-Control':'no-cache','X-Content-Type-Options':'nosniff','Referrer-Policy':'same-origin'}});
 }};}

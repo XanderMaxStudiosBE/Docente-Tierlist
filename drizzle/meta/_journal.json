@@ -57,6 +57,13 @@
       "when": 1791398545636,
       "tag": "0007_sturdy_gamma_corps",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "6",
+      "when": 1791399960930,
+      "tag": "0008_mighty_kid_colt",
+      "breakpoints": true
     }
   ]
 }

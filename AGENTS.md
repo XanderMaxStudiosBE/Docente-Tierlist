@@ -23,7 +23,8 @@ Read `HANDOFF.md` for the product decisions and hosting context before changing 
 - Public visitors must not gain admin reset access.
 - School-year storage in `worker/features.js` keeps 2026-2027 class IDs unchanged and prefixes later stored IDs with `YEAR:`. API IDs remain stable. Use the scoped DB for vote/class queries; keep member tierlists explicitly keyed by school year. Archived years reject public writes and admin resets.
 - Teacher photos and uploads were removed. Do not restore photo UI or routes. Preserve existing photo tables, immutable migrations and storage bindings without exposing stored files.
-- Member accounts only save drafts. Loading/saving drafts must not cast a vote or give admin access.
+- Loading/saving account drafts must not cast a vote or give admin access. Submitting a valid ballot while signed in also saves that tierlist and its teacher-name snapshot in the same database batch. Keep the anonymous voting cookie separate from member authentication.
+- Feedback tickets are private to their submitting member and authenticated admins. Use server-side ownership checks and the raw database for tickets across classes and school years. Never expose other members' tickets or account identifiers.
 
 ## Production publishing
 

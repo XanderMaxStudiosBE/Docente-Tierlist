@@ -61,6 +61,14 @@ Migratie 0006 voegt alleen nieuwe tabellen toe. De volledige testsuite bevat inm
 
 De gebruiker wil de ontwikkeling en deze conversatie verderzetten via GitHub en Codex cloud. Lees deze overdracht, controleer de beschikbare Sites-verbinding en neem de gebruikersverzoeken mee. Controleer desgewenst eerst de voortgang van DNS en HTTPS. Maak geen nieuwe Site, verander geen hostingprovider en reset geen rankings zonder een nieuw verzoek.
 
+## Feedback en automatische accountopslag
+
+De Feedback-tab bevat suggesties, klachten en bugtickets over de website. Tickets vereisen een ingelogd memberaccount en zijn alleen toegankelijk voor de indiener en ingelogde admins. Admins lezen tickets van alle klassen en schooljaren, antwoorden en zetten de status op open, in behandeling of afgesloten. Gesprekken blijven behouden bij schooljaarwissels en rankingresets. Nieuwe migratie 0008 voegt uitsluitend support_tickets en ticket_messages toe. worker/tickets.js gebruikt de raw database omdat tickets appbreed zijn. Writes vereisen dezelfde origin; ticketcreatie en antwoorden hebben accountlimieten en revisions voorkomen dubbele replies bij conflicten. E-mail en account-id worden niet in ticketresponses meegestuurd.
+
+De testsuite bevat nu 25 tests. Het favicon is de door de gebruiker aangeleverde afbeelding, als 64×64 PNG in public/favicon.png. De bouw en preview nemen dit als binary asset op; beide pagina's linken hetzelfde favicon.
+
+Bij het insturen van een ranking door een ingelogde member slaat de server dezelfde tierlist en docentnamen atomair met de stemmen in het account op. De sleutel blijft account, schooljaar en klas; een gast kan gewoon anoniem stemmen. Alleen een ontwerp handmatig opslaan of laden brengt geen stem uit.
+
 ## Docentfoto’s verwijderd op verzoek
 
 De docentfoto’s, uploads en goedkeuringswachtrij zijn uit de website en het adminpaneel verwijderd. Kaartjes gebruiken weer initialen. De oude foto- en uploadroutes geven 404; resultaten bevatten geen foto-URLs meer. Bestaande fototabellen, migraties en R2-binding blijven behouden zonder publiek toegankelijke bestanden. Herintroduceer de historische foto-instructies hierboven niet zonder nieuw verzoek.
