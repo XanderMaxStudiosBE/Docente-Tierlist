@@ -19,6 +19,9 @@ Read `HANDOFF.md` for the product decisions and hosting context before changing 
 - Resetting a ranking starts a new round. Do not delete historical votes to implement a reset.
 - Applied Drizzle migrations are immutable. Append a migration for schema changes and preserve the journal and snapshots.
 - Public visitors must not gain admin reset access or overwrite another uploader's photo.
+- School-year storage in `worker/features.js` keeps 2026-2027 class IDs unchanged and prefixes later stored IDs with `YEAR:`. API IDs remain stable. Use the scoped DB for vote/class queries; keep member tierlists explicitly keyed by school year. Archived years reject public writes and admin resets.
+- New photos enter `photo_submissions`; only approved `teacher_photos` are public. Do not make pending photo URLs publicly accessible.
+- Member accounts only save drafts. Loading/saving drafts must not cast a vote or give admin access.
 
 ## Production publishing
 

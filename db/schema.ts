@@ -46,3 +46,10 @@ export const adminAttempts = sqliteTable('admin_attempts', {
 export const teacherPhotos = sqliteTable('teacher_photos', {
   nameKey: text('name_key').primaryKey(), objectKey: text('object_key').notNull(), ownerHash: text('owner_hash').notNull(), uploadedAt: integer('uploaded_at').notNull(),
 });
+
+export const schoolYears = sqliteTable('school_years', {year:text('year').primaryKey()});
+export const favorites = sqliteTable('favorites', {classId:text('class_id').notNull(),roundId:text('round_id').notNull(),voterId:text('voter_id').notNull(),teacherId:integer('teacher_id').notNull()},t=>[primaryKey({columns:[t.classId,t.roundId,t.voterId]}),check('favorite_teacher',sql`${t.teacherId} BETWEEN 1 AND 7`)]);
+export const photoSubmissions = sqliteTable('photo_submissions', {objectKey:text('object_key').primaryKey(),nameKey:text('name_key').notNull(),teacherName:text('teacher_name').notNull(),ownerHash:text('owner_hash').notNull(),uploadedAt:integer('uploaded_at').notNull(),status:text('status').notNull()},t=>[index('idx_photo_status').on(t.status),check('photo_status',sql`${t.status} IN ('pending','approved','rejected')`)]);
+export const memberAccounts = sqliteTable('member_accounts', {id:text('id').primaryKey(),email:text('email').notNull().unique(),passwordHash:text('password_hash').notNull(),salt:text('salt').notNull()});
+export const memberSessions = sqliteTable('member_sessions', {tokenHash:text('token_hash').primaryKey(),accountId:text('account_id').notNull(),expiresAt:integer('expires_at').notNull()});
+export const savedTierlists = sqliteTable('saved_tierlists', {accountId:text('account_id').notNull(),schoolYear:text('school_year').notNull(),classId:text('class_id').notNull(),ranking:text('ranking').notNull()},t=>[primaryKey({columns:[t.accountId,t.schoolYear,t.classId]})]);

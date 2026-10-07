@@ -46,4 +46,16 @@ Laatste controle: provider_status `active`, maar Site-status `pending` en ssl_st
 
 ## Volgende cloudchat
 
+## Toegevoegde functies op 7 oktober 2026
+
+Nieuwe bezoekers kiezen hun klas op het beginscherm. Alleen deze apparaatvoorkeur wordt in localStorage onthouden. Elke klas heeft een aparte favoriete-docentstem per browser en stemronde; de uitslag blijft blind totdat de tierlist is ingestuurd.
+
+Schooljaar 2026-2027 bevat de bestaande data. Admins kunnen het volgende schooljaar starten; oude jaren blijven alleen leesbaar en hebben eigen namen en stemmen. `worker/features.js` namespaceert voor latere jaren de opgeslagen class_id met `YEAR:`, zonder de externe IDs te wijzigen. Ook voterhashes zijn per jaar gescheiden. Deze adapter is essentieel voor alle queries in de bestaande stem- en klastabellen.
+
+Nieuwe docentfoto's gaan naar `photo_submissions`. Admins keuren goed of wijzen af; bestaande foto's blijven tot goedkeuring staan. Publieke fotoverzoeken moeten een huidige goedgekeurde foto hebben; pending foto's zijn alleen met een adminsessie zichtbaar.
+
+Bezoekers kunnen een account aanmaken met e-mail en wachtwoord en eigen tierlistontwerpen server-side bewaren per klas en schooljaar. Accountcookies staan los van de anonieme stemcookie. Opslaan en laden brengen geen stem uit. Accounts hebben PBKDF2-wachtwoordhashes, tijdelijke server-side sessies en een inloglimiet. E-mailverificatie en wachtwoordherstel zijn nog niet toegevoegd.
+
+Migratie 0006 voegt alleen nieuwe tabellen toe. De volledige testsuite bevat 16 tests.
+
 De gebruiker wil de ontwikkeling en deze conversatie verderzetten via GitHub en Codex cloud. Lees deze overdracht, controleer de beschikbare Sites-verbinding en neem de gebruikersverzoeken mee. Controleer desgewenst eerst de voortgang van DNS en HTTPS. Maak geen nieuwe Site, verander geen hostingprovider en reset geen rankings zonder een nieuw verzoek.

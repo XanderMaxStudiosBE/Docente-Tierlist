@@ -43,6 +43,13 @@
       "when": 1791368292006,
       "tag": "0005_dark_firebird",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "6",
+      "when": 1791380673384,
+      "tag": "0006_school_accounts_moderation",
+      "breakpoints": true
     }
   ]
 }

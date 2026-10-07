@@ -1,11 +1,12 @@
+import {moderationState,moderatePhoto,yearsState} from './features.js';
 import {DEFAULT_CLASS,resolveClass} from '../public/classes.js';
 const adminCookieName='docente_admin';
 const authJson=(data,status=200,headers={})=>Response.json(data,{status,headers:{'Cache-Control':'no-store',...headers}});
 const hex=bytes=>Array.from(new Uint8Array(bytes),b=>b.toString(16).padStart(2,'0')).join('');
 export async function digest(value){return hex(await crypto.subtle.digest('SHA-256',new TextEncoder().encode(value)));}
 function equal(a,b){if(typeof a!=='string'||typeof b!=='string'||a.length!==b.length)return false;let diff=0;for(let i=0;i<a.length;i++)diff|=a.charCodeAt(i)^b.charCodeAt(i);return diff===0;}
-function randomToken(){return hex(crypto.getRandomValues(new Uint8Array(32)));}
-async function passwordHash(password,salt){const key=await crypto.subtle.importKey('raw',new TextEncoder().encode(password),'PBKDF2',false,['deriveBits']);return hex(await crypto.subtle.deriveBits({name:'PBKDF2',hash:'SHA-256',salt:new Uint8Array(salt.match(/../g).map(v=>parseInt(v,16))),iterations:100000},key,256));}
+export function randomToken(){return hex(crypto.getRandomValues(new Uint8Array(32)));}
+export async function passwordHash(password,salt){const key=await crypto.subtle.importKey('raw',new TextEncoder().encode(password),'PBKDF2',false,['deriveBits']);return hex(await crypto.subtle.deriveBits({name:'PBKDF2',hash:'SHA-256',salt:new Uint8Array(salt.match(/../g).map(v=>parseInt(v,16))),iterations:100000},key,256));}
 function cookieValue(request){return request.headers.get('cookie')?.split(';').map(c=>c.trim()).find(c=>c.startsWith(adminCookieName+'='))?.slice(adminCookieName.length+1)||'';}
 function authCookie(request,token,maxAge=86400){return `${adminCookieName}=${token}; Path=/; HttpOnly; SameSite=Strict; Max-Age=${maxAge}${new URL(request.url).protocol==='https:'?'; Secure':''}`;}
 export async function activeRounds(db,classes,initialRound){const [rows]=await db.batch([db.prepare('SELECT class_id, round_id FROM class_rounds')]);return new Map(classes.map(id=>[id,rows.results.find(r=>r.class_id===id)?.round_id||initialRound]));}
@@ -16,7 +17,7 @@ export async function handleAdmin(request,env,date,classes,initialRound){
   try{
     const [accountResult]=await db.batch([db.prepare('SELECT email, password_hash, salt FROM admin_account WHERE id = 1')]);const account=accountResult.results[0];
     const signedIn=await authenticated(request,env,date);
-    if(url.pathname==='/api/admin/state' && request.method==='GET')return authJson({configured:!!account,authenticated:signedIn,...(signedIn?{email:account.email,classes:await summary(env,date,classes,initialRound)}:{})});
+    if(url.pathname==='/api/admin/state' && request.method==='GET')return authJson({configured:!!account,authenticated:signedIn,...(signedIn?{email:account.email,classes:await summary(env,date,classes,initialRound),...env.YEAR,pendingPhotos:await moderationState(env)}:{})});
     if(request.method!=='POST')return authJson({error:'Gebruik POST.'},405,{Allow:'POST'});
     if(request.headers.get('origin')!==url.origin || request.headers.get('sec-fetch-site')==='cross-site')return authJson({error:'Onjuiste herkomst.'},403);
     if(!(request.headers.get('content-type')||'').startsWith('application/json'))return authJson({error:'Gebruik JSON.'},415);
@@ -37,7 +38,15 @@ export async function handleAdmin(request,env,date,classes,initialRound){
     }
     if(url.pathname==='/api/admin/logout'){const token=cookieValue(request);if(token)await db.batch([db.prepare('DELETE FROM admin_sessions WHERE token_hash = ?').bind(await digest(token))]);return authJson({authenticated:false},200,{'Set-Cookie':authCookie(request,'',0)});}
     if(!signedIn)return authJson({error:'Log eerst in als admin.'},401);
+    if(url.pathname==='/api/admin/photos')return moderatePhoto(env,body,date);
+    if(url.pathname==='/api/admin/year'){
+      if(Object.keys(body).some(k=>k!=='confirm')||body.confirm!=='NEW_YEAR')return authJson({error:'Bevestig het nieuwe schooljaar.'},400);
+      const state=await yearsState(env.RAW_DB);const start=Number(state.currentYear.slice(0,4))+1;const year=start+'-'+(start+1);
+      if(start>2100)return authJson({error:'Geen nieuw schooljaar beschikbaar.'},400);
+      await env.RAW_DB.batch([env.RAW_DB.prepare('INSERT OR IGNORE INTO school_years (year) VALUES (?)').bind(year)]);return authJson({created:true,...await yearsState(env.RAW_DB)});
+    }
     if(url.pathname==='/api/admin/reset'){
+      if(env.YEAR.archived)return authJson({error:'Een gearchiveerd schooljaar kan niet worden gereset.'},409);
       const classId=body.classId==='all'?'all':resolveClass(body.classId);
       if(Object.keys(body).some(k=>!['classId','confirm'].includes(k))||body.confirm!=='RESET'||!['all',...classes].includes(classId))return authJson({error:'Kies een klas en bevestig de reset.'},400);
       const chosen=classId==='all'?classes:[classId];

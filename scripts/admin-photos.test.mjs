@@ -49,13 +49,13 @@ test('Photos persist, share by teacher name, reject spoofed files and enforce up
  const env=await envForTest();env.PHOTOS=memoryPhotos();try{
   const p=await person(env),other=await person(env);
   assert.equal((await photo(env,p.cookie,new TextEncoder().encode('<html>not a photo</html>'))).status,415);
-  let response=await photo(env,p.cookie);assert.equal(response.status,200);const saved=(await response.json()).photo;assert.equal(env.PHOTOS.files.size,1);
+  let response=await photo(env,p.cookie);assert.equal(response.status,200);assert.equal((await response.json()).pending,true);const admin=await setup(env);let state=await (await worker.fetch(new Request(origin+'/api/admin/state',{headers:{cookie:admin}}),env)).json();const saved={url:state.pendingPhotos[0].url};assert.equal((await worker.fetch(new Request(origin+saved.url),env)).status,404);assert.equal((await post(env,'/api/admin/photos',{key:state.pendingPhotos[0].key,action:'approve'},admin)).status,200);assert.equal(env.PHOTOS.files.size,1);
   response=await worker.fetch(new Request(origin+saved.url),env);assert.equal(response.status,200);assert.equal(response.headers.get('content-type'),'image/png');assert.equal(response.headers.get('x-content-type-options'),'nosniff');assert.deepEqual(new Uint8Array(await response.arrayBuffer()),png);
   assert.equal((await photo(env,other.cookie)).status,403);
   assert.equal((await photo(env,p.cookie,new Uint8Array(3*1024*1024+1))).status,413);
   await post(env,'/api/classes',{classId:'1ITF01',teacherNames:['Lena Dillien','Docent twee','Docent drie','Docent vier','Docent vijf','Docent zes','Docent zeven']},p.cookie);
   let data=await (await worker.fetch(new Request(origin+'/api/results?classId=1ITF01',{headers:{cookie:p.cookie}}),env)).json();assert.equal(data.photos[0].url,saved.url);assert.equal(data.photos[0].canReplace,true);
-  const admin=await setup(env);await post(env,'/api/admin/reset',{classId:'all',confirm:'RESET'},admin);data=await (await worker.fetch(new Request(origin+'/api/results',{headers:{cookie:p.cookie}}),env)).json();assert.equal(data.photos[0].url,saved.url);
-  response=await photo(env,other.cookie+'; '+admin);assert.equal(response.status,200);assert.equal(env.PHOTOS.files.size,1);assert.notEqual((await response.json()).photo.url,saved.url);
+  await post(env,'/api/admin/reset',{classId:'all',confirm:'RESET'},admin);data=await (await worker.fetch(new Request(origin+'/api/results',{headers:{cookie:p.cookie}}),env)).json();assert.equal(data.photos[0].url,saved.url);
+  response=await photo(env,other.cookie+'; '+admin);assert.equal(response.status,200);assert.equal(env.PHOTOS.files.size,2);assert.equal((await response.json()).pending,true);state=await (await worker.fetch(new Request(origin+'/api/admin/state',{headers:{cookie:admin}}),env)).json();const next=state.pendingPhotos[0];assert.notEqual(next.url,saved.url);await post(env,'/api/admin/photos',{key:next.key,action:'reject'},admin);data=await (await worker.fetch(new Request(origin+'/api/results',{headers:{cookie:p.cookie}}),env)).json();assert.equal(data.photos[0].url,saved.url);assert.equal((await worker.fetch(new Request(origin+next.url),env)).status,404);
  }finally{env.DB.close();}
 });

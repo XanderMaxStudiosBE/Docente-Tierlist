@@ -6,8 +6,13 @@ const avatarColors = [['#333c51','#bbcdf8'],['#463448','#e9b1df'],['#344239','#a
 const teacherNames = ['Lena Dillien','Brent Pulmans','Michaël Cloots','Natalie Smets','Bart Portier','Stef Adriaansen','Stef Van Wolputte'];
 const teachers = teacherNames.map((name,i)=>({id:i+1,name,tier:'unranked'}));
 const classes=CLASS_IDS;
+let preferredClass=null;try{preferredClass=localStorage.getItem('docente_class');}catch{}
+let welcomeRequired=!resolveClass(preferredClass);
+let selectedYear=new URLSearchParams(location.search).get('jaar')||'';
+let accountState={authenticated:false},accountBusy=false,favoriteBusy=false;
+const siteFetch=(path,options)=>{const url=new URL(path,location.origin);if(selectedYear)url.searchParams.set('year',selectedYear);return fetch(url,options);};
 const requestedClass=new URLSearchParams(location.search).get('klas');
-let activeClass=resolveClass(requestedClass)||DEFAULT_CLASS;
+let activeClass=resolveClass(requestedClass)||resolveClass(preferredClass)||DEFAULT_CLASS;
 let classConfigured=activeClass===DEFAULT_CLASS;
 let resultScope='class';
 let savingNames=false;
@@ -33,13 +38,17 @@ function announce(message){$('#announcement').textContent=message;}
 function notify(message){const toast=$('#toast');toast.textContent=message;toast.hidden=false;clearTimeout(toastTimer);toastTimer=setTimeout(()=>{toast.hidden=true;},2600);}
 function snapshot(){history.push(teachers.map(t=>({...t})));if(history.length>50)history.shift();}
 function renderClassControls(){
-  const busy=loadingResults || sendingVote || sendingDuel || savingNames || uploadingPhoto;
+  const archived=!!resultData?.archived;
+  $('#year-select').disabled=loadingResults||sendingVote||sendingDuel||savingNames||uploadingPhoto||favoriteBusy||accountBusy;
+  $('#year-status').textContent=archived?'Archief · '+selectedYear+' · Je kunt de resultaten bekijken. Stemmen en wijzigen zijn gesloten.':'';
+  const busy=loadingResults || sendingVote || sendingDuel || savingNames || uploadingPhoto||favoriteBusy||accountBusy;
+  $('#ranking-main').hidden=welcomeRequired;$('#welcome-screen').hidden=!welcomeRequired;$('#open-account').hidden=welcomeRequired;
   $('#class-select').value=activeClass;$('#class-select').disabled=busy;
   $('#current-class').textContent=classLabel(activeClass);
   $('#class-setup').hidden=classConfigured;
-  ['.intro','#teacher-photos','.workspace','.submit-bar','.duel-section','.results-section'].forEach(s=>$(s).hidden=!classConfigured);
+  ['.intro','#teacher-photos','.workspace','.submit-bar','.duel-section','.results-section','#favorite-section','.account-tierlist'].forEach(s=>$(s).hidden=!classConfigured);
   $('#setup-heading').textContent='Docenten van '+classLabel(activeClass);
-  $('#setup-teachers').disabled=!votingReady || busy;
+  $('#setup-teachers').disabled=archived||!votingReady || busy;
   $('#setup-status').textContent=loadingResults?'Klas laden…':!votingReady?'De klas kon niet worden geladen. Probeer opnieuw.':'';
   $('#retry-class').hidden=votingReady || loadingResults;
   $('#edit-names').hidden=true;
@@ -55,10 +64,10 @@ function renderClassControls(){
 async function selectClass(classId){
   classId=resolveClass(classId);
   if(!classes.includes(classId))throw new Error('Onbekende klas.');
-  if(loadingResults || sendingVote || sendingDuel || savingNames || uploadingPhoto)throw new Error('Wacht tot de huidige bewerking klaar is.');
+  if(loadingResults || sendingVote || sendingDuel || savingNames || uploadingPhoto||favoriteBusy||accountBusy)throw new Error('Wacht tot de huidige bewerking klaar is.');
   if(classId===activeClass)return {classId:activeClass,configured:classConfigured};
   classDrafts.set(activeClass,{teachers:teachers.map(t=>({...t})),history,duelIndex,round:currentRound});
-  activeClass=classId;resultScope='class';selectedId=null;draggedId=null;resultData=null;submittedRanking=null;votingReady=false;classConfigured=classId===DEFAULT_CLASS;
+  activeClass=classId;try{localStorage.setItem('docente_class',classId);}catch{};resultScope='class';selectedId=null;draggedId=null;resultData=null;submittedRanking=null;votingReady=false;classConfigured=classId===DEFAULT_CLASS;
   const draft=classDrafts.get(classId);teachers.splice(0,7,...(draft?.teachers||teacherNames.map((name,i)=>({id:i+1,name,tier:'unranked'}))));history=draft?.history||[];duelIndex=draft?.duelIndex||0;currentRound=draft?.round||null;
   const url=new URL(location.href);url.searchParams.set('klas',classLabel(classId));window.history.replaceState(null,'',url);
   $('#community-content').hidden=true;$('#blind-message').hidden=false;$('#results-table').replaceChildren();$('#results-status').textContent='Stemmen van '+classLabel(classId)+' laden…';
@@ -74,7 +83,7 @@ function renderPhotos(){
   const grid=$('#photo-grid');grid.replaceChildren();
   if(!classConfigured)return;
   teachers.forEach(t=>{const tile=element('article','photo-tile');const photo=photoForTeacher(t.id);if(photo){const image=element('img');image.src=photo.url;image.alt='Foto van '+t.name;image.loading='lazy';tile.append(image);}else{tile.append(element('div','photo-placeholder',t.name.split(/\s+/).map(w=>w[0]).slice(0,2).join('')));}
-    tile.append(element('strong','',t.name));if(!photo||photo.canReplace){const label=element('label','photo-upload',photo?'Foto vervangen':'Foto uploaden');const input=element('input');input.type='file';input.accept='image/jpeg,image/png,image/webp';input.setAttribute('aria-label','Foto uploaden voor '+t.name);input.disabled=uploadingPhoto||loadingResults||!votingReady;input.addEventListener('change',()=>{if(input.files[0])uploadTeacherPhoto(t.id,input.files[0]).catch(()=>{});});label.append(input);tile.append(label);}else tile.append(element('span','feature-note','Foto toegevoegd'));grid.append(tile);});
+    tile.append(element('strong','',t.name));if(!resultData?.archived&&(!photo||photo.canReplace)){const label=element('label','photo-upload',photo?'Foto vervangen':'Foto uploaden');const input=element('input');input.type='file';input.accept='image/jpeg,image/png,image/webp';input.setAttribute('aria-label','Foto uploaden voor '+t.name);input.disabled=uploadingPhoto||loadingResults||!votingReady;input.addEventListener('change',()=>{if(input.files[0])uploadTeacherPhoto(t.id,input.files[0]).catch(()=>{});});label.append(input);tile.append(label);}else tile.append(element('span','feature-note','Foto toegevoegd'));grid.append(tile);});
 }
 async function uploadTeacherPhoto(teacherId,file){
   if(uploadingPhoto||loadingResults||!votingReady||!classConfigured)return;
@@ -84,8 +93,8 @@ async function uploadTeacherPhoto(teacherId,file){
     const bitmap=await createImageBitmap(file);const scale=Math.min(1,1200/Math.max(bitmap.width,bitmap.height));const canvas=document.createElement('canvas');canvas.width=Math.max(1,Math.round(bitmap.width*scale));canvas.height=Math.max(1,Math.round(bitmap.height*scale));canvas.getContext('2d').drawImage(bitmap,0,0,canvas.width,canvas.height);bitmap.close();
     const blob=await new Promise(resolve=>canvas.toBlob(resolve,'image/webp',.85));if(!blob)throw new Error('De afbeelding kon niet worden verwerkt.');
     const form=new FormData();form.set('photo',blob,'docent.webp');form.set('classId',activeClass);form.set('teacherId',teacherId);
-    const response=await fetch('/api/photos',{method:'POST',credentials:'same-origin',body:form});const data=await response.json();if(!response.ok)throw new Error(data.error||'Upload mislukt.');
-    resultData.photos=[...(resultData.photos||[]).filter(p=>p.teacherId!==teacherId),data.photo];$('#photo-status').textContent='Foto opgeslagen voor '+teacherName(teacherId)+'.';render();
+    const response=await siteFetch('/api/photos',{method:'POST',credentials:'same-origin',body:form});const data=await response.json();if(!response.ok)throw new Error(data.error||'Upload mislukt.');
+    $('#photo-status').textContent='Foto ingestuurd voor '+teacherName(teacherId)+'. Een admin keurt hem eerst goed.';render();
   }catch(error){$('#photo-status').textContent=error.message||'Foto uploaden mislukt. Probeer opnieuw.';throw error;}
   finally{uploadingPhoto=false;updateVotingControls();renderPhotos();}
 }
@@ -101,7 +110,7 @@ async function saveClassNames(names){
   if(!Array.isArray(names)||names.length!==7||names.some(n=>typeof n!=='string'||!n.trim()||n.trim().length>50))throw new Error('Vul zeven volledige docentnamen in.');
   savingNames=true;updateVotingControls();$('#save-names').disabled=true;let refresh=false;
   try{
-    const response=await fetch('/api/classes',{method:'POST',headers:{'Content-Type':'application/json'},credentials:'same-origin',body:JSON.stringify({classId:activeClass,teacherNames:names})});
+    const response=await siteFetch('/api/classes',{method:'POST',headers:{'Content-Type':'application/json'},credentials:'same-origin',body:JSON.stringify({classId:activeClass,teacherNames:names})});
     const data=await response.json();refresh=response.status===409;if(!response.ok)throw new Error(data.error||'Opslaan mislukt.');
     applyClassData(data);resultData=data;currentRound=data.roundId;teachers.forEach(t=>t.tier='unranked');history=[];render();$('#names-dialog').close();notify('Docenten opgeslagen voor '+classLabel(activeClass)+'. Iedereen kan nu stemmen.');return {saved:true,classId:activeClass,teacherNames:data.teacherNames};
   }catch(error){$('#names-error').textContent=error.message;throw error;}
@@ -152,14 +161,16 @@ function render(){
   updateVotingControls();
   renderPhotos();
   if(resultData)renderResults();
+  renderFavorite();
 }
 function currentRanking(){return teachers.map(t=>({teacherId:t.id,tier:t.tier}));}
 function updateVotingControls(){
   renderClassControls();
+  renderAccount();
   const complete=teachers.every(t=>tiers.includes(t.tier));
   const matches=submittedRanking && JSON.stringify(currentRanking())===JSON.stringify(submittedRanking);
   const counted=matches && resultData?.votedThisWeek;
-  $('#submit-vote').disabled=!classConfigured || !complete || !votingReady || sendingVote || sendingDuel || savingNames || uploadingPhoto || loadingResults || counted;
+  $('#submit-vote').disabled=!!resultData?.archived||!classConfigured || !complete || !votingReady || sendingVote || sendingDuel || savingNames || uploadingPhoto || loadingResults || counted;
   $('#export-ranking').disabled=!teachers.some(t=>tiers.includes(t.tier));
   $('#submit-vote').textContent=sendingVote?'Versturen…':matches&&!counted?'Meetellen deze week':submittedRanking?'Stem bijwerken':'Ranking insturen';
   $('#vote-status').textContent=!votingReady?'Stemmen laden. Bij een fout kun je opnieuw vernieuwen.':!complete?'Rank alle zeven docenten om je stem in te sturen.':counted?'Je ranking telt mee, ook voor deze week.':matches?'Laat deze ranking ook voor de huidige week meetellen.':submittedRanking?'Je hebt je ranking aangepast. Werk je stem bij om deze te laten meetellen.':'Je ranking is klaar om mee te tellen. Daarna verschijnen de resultaten.';
@@ -175,7 +186,7 @@ function renderDuels(){
   $('#duel-progress').textContent=`${mine.length} / 21 gekozen`;
   for(const [selector,id] of [['#duel-left',pair.leftId],['#duel-right',pair.rightId]]){
     const button=$(selector);button.replaceChildren();button.disabled=!votingReady || sendingDuel || sendingVote || loadingResults;
-    button.disabled=button.disabled || !classConfigured || savingNames || uploadingPhoto;button.setAttribute('aria-pressed',String(vote?.winnerId===id));button.classList.toggle('duel-picked',vote?.winnerId===id);
+    button.disabled=button.disabled || !!resultData?.archived||!classConfigured || savingNames || uploadingPhoto;button.setAttribute('aria-pressed',String(vote?.winnerId===id));button.classList.toggle('duel-picked',vote?.winnerId===id);
     button.append(element('span','duel-number',String(id).padStart(2,'0')),element('strong','',teacherName(id)),element('span','duel-prompt',vote?.winnerId===id?'Jouw keuze':'Kies deze docent'));
   }
   $('#duel-prev').disabled=duelIndex===0 || sendingDuel;
@@ -199,7 +210,7 @@ async function chooseDuel(winnerId){
   if(!classConfigured || !votingReady || sendingDuel || sendingVote || loadingResults || savingNames || uploadingPhoto)throw new Error('Stel de docenten in en wacht tot de stemmen geladen zijn.');
   sendingDuel=true;updateVotingControls();let stale=false;
   try{
-    const response=await fetch('/api/duels',{method:'POST',headers:{'Content-Type':'application/json'},credentials:'same-origin',body:JSON.stringify({...pair,winnerId,roundId:currentRound,classId:activeClass})});
+    const response=await siteFetch('/api/duels',{method:'POST',headers:{'Content-Type':'application/json'},credentials:'same-origin',body:JSON.stringify({...pair,winnerId,roundId:currentRound,classId:activeClass})});
     const data=await response.json();stale=response.status===409;if(!response.ok)throw new Error(data.error||'Keuze opslaan mislukt.');
     resultData=data;submittedRanking=data.myRanking.length===7?data.myRanking:null;
     const next=pairs.findIndex((p,i)=>i>duelIndex && !data.myDuels.some(d=>d.leftId===p.leftId && d.rightId===p.rightId));
@@ -312,16 +323,17 @@ function renderResults(){
   });
 }
 async function fetchResults(restore=false,silent=false){
-  if(loadingResults || sendingVote || sendingDuel || savingNames || uploadingPhoto)return;
+  if(loadingResults || sendingVote || sendingDuel || savingNames || uploadingPhoto||favoriteBusy||accountBusy)return;
   loadingResults=true;updateVotingControls();
   $('#refresh-results').disabled=true;
   try{
     if(location.protocol==='file:')throw new Error('local-file');
-    const response=await fetch('/api/results?classId='+encodeURIComponent(activeClass),{credentials:'same-origin',cache:'no-store'});
+    const response=await siteFetch('/api/results?classId='+encodeURIComponent(activeClass),{credentials:'same-origin',cache:'no-store'});
     if(!response.ok)throw new Error('offline');
     const data=await response.json();if(!Array.isArray(data.myRanking) || (!data.blind && (!Array.isArray(data.teachers) || data.teachers.length!==7)))throw new Error('invalid-results');
     applyClassData(data);
     const newRound=currentRound!==null && currentRound!==data.roundId;
+    selectedYear=data.year;const yearSelect=$('#year-select');yearSelect.replaceChildren();for(const year of data.years){const option=element('option','',year+(year===data.currentYear?' · actief':' · archief'));option.value=year;yearSelect.append(option);}yearSelect.value=selectedYear;
     currentRound=data.roundId;resultData=data;votingReady=true;submittedRanking=data.myRanking.length===7?data.myRanking:null;
     if(newRound){teachers.forEach(t=>t.tier='unranked');selectedId=null;history=[];duelIndex=0;render();notify('Een nieuwe stemronde is gestart. Iedereen begint opnieuw.');}
     if(restore && submittedRanking && teachers.every(t=>t.tier==='unranked')){teachers.forEach(t=>t.tier=submittedRanking.find(row=>row.teacherId===t.id).tier);render();}
@@ -336,7 +348,7 @@ async function submitVote(){
   if(!classConfigured || !votingReady || sendingVote || sendingDuel || loadingResults || savingNames || uploadingPhoto || teachers.some(t=>!tiers.includes(t.tier)))return;
   const sent=currentRanking();let refreshRound=false;sendingVote=true;updateVotingControls();
   try{
-    const response=await fetch('/api/votes',{method:'POST',headers:{'Content-Type':'application/json'},credentials:'same-origin',body:JSON.stringify({rankings:sent,roundId:currentRound,classId:activeClass})});
+    const response=await siteFetch('/api/votes',{method:'POST',headers:{'Content-Type':'application/json'},credentials:'same-origin',body:JSON.stringify({rankings:sent,roundId:currentRound,classId:activeClass})});
     const data=await response.json();refreshRound=response.status===409;if(!response.ok)throw new Error(data.error||'Je stem kon niet worden opgeslagen.');
     submittedRanking=sent;resultData=data;renderResults();$('#results-status').textContent='Alle ingestuurde stemmen tellen mee.';notify('Je ranking is meegeteld.');announce('Je ranking is meegeteld in de percentages.');return {saved:true,results:data};
   }catch(error){notify(error.message||'Versturen mislukt. Probeer opnieuw.');$('#results-status').textContent='Versturen mislukt. Je ranking blijft staan; probeer opnieuw.';return {saved:false,error:error.message};}
@@ -352,7 +364,8 @@ $('#retry-class').addEventListener('click',()=>fetchResults(true));
 $('#names-form').addEventListener('submit',event=>{event.preventDefault();saveClassNames(teachers.map(t=>$('#name-'+t.id).value.trim())).catch(error=>$('#names-error').textContent=error.message);});
 for(const group of CLASS_GROUPS){const options=document.createElement('optgroup');options.label=group.label;for(const klass of group.classes){const option=document.createElement('option');option.value=klass.id;option.textContent=klass.label;options.append(option);}$('#class-select').append(options);}
 $('#class-select').addEventListener('change',()=>selectClass($('#class-select').value).catch(error=>{renderClassControls();notify(error.message);}));
-function selectScope(scope){resultScope=scope;renderClassControls();if(resultData)renderResults();}
+function selectScope(scope){resultScope=scope;renderClassControls();if(resultData)renderResults();
+  renderFavorite();}
 $('#scope-class').addEventListener('click',()=>selectScope('class'));
 $('#scope-overall').addEventListener('click',()=>selectScope('overall'));
 ['#scope-class','#scope-overall'].forEach(selector=>$(selector).addEventListener('keydown',event=>{if(!['ArrowLeft','ArrowRight','Home','End'].includes(event.key))return;event.preventDefault();const scope=event.key==='Home'?'class':event.key==='End'?'overall':resultScope==='class'?'overall':'class';selectScope(scope);$('#scope-'+scope).focus();}));
@@ -367,10 +380,10 @@ $('#export-ranking').addEventListener('click',()=>downloadRanking().catch(()=>{}
 $('#close-export').addEventListener('click',()=>$('#export-dialog').close());
 $('#export-dialog').addEventListener('close',()=>{if(exportUrl)URL.revokeObjectURL(exportUrl);exportUrl=null;$('#export-image').removeAttribute('src');$('#save-image').removeAttribute('href');});
 document.addEventListener('keydown',event=>{if(event.ctrlKey || event.metaKey || event.altKey || event.repeat || event.target.matches('input,textarea,select,[contenteditable]') || $('#names-dialog').open || $('#export-dialog').open)return;const tier=event.key.toUpperCase();if(selectedId!==null && tiers.includes(tier)){event.preventDefault();moveTeacher(selectedId,tier);}});
-const liveTimer=setInterval(()=>{if(document.visibilityState==='visible' && !$('#names-dialog').open && !$('#export-dialog').open)fetchResults(false,true);},30000);
-document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible')fetchResults(false,true);});
+const liveTimer=setInterval(()=>{if(!welcomeRequired&&document.visibilityState==='visible' && !$('#names-dialog').open && !$('#export-dialog').open)fetchResults(false,true);},30000);
+document.addEventListener('visibilitychange',()=>{if(!welcomeRequired&&document.visibilityState==='visible')fetchResults(false,true);});
 window.addEventListener('pagehide',()=>clearInterval(liveTimer),{once:true});
-fetchResults(true);
+if(!welcomeRequired)fetchResults(true);
 const modelContext=document.modelContext;
 if(modelContext?.registerTool){
   const lifecycle=new AbortController();
@@ -395,3 +408,21 @@ if(modelContext?.registerTool){
   for(const tool of tools){try{Promise.resolve(modelContext.registerTool(tool,{signal:lifecycle.signal})).catch(()=>{});}catch{}}
   window.addEventListener('pagehide',()=>lifecycle.abort(),{once:true});
 }
+
+function renderFavorite(){
+ const select=$('#favorite-select');select.replaceChildren();const placeholder=element('option','','Kies een docent');placeholder.value='';select.append(placeholder);teachers.forEach(t=>{const option=element('option','',t.name);option.value=t.id;select.append(option);});select.value=resultData?.myFavorite||'';select.disabled=!votingReady||favoriteBusy||!!resultData?.archived;$('#save-favorite').disabled=select.disabled||!classConfigured;
+ const rows=resultData?.favoriteResults||[],total=rows.reduce((s,r)=>s+r.count,0);$('#favorite-results').replaceChildren();if(resultData?.blind){$('#favorite-results').textContent='Stuur je tierlist in om de publieksprijs te bekijken.';return;}
+ rows.slice().sort((a,b)=>b.count-a.count||a.teacher_id-b.teacher_id).forEach(r=>{const card=element('article','favorite-result');card.append(element('strong','',teacherName(r.teacher_id)),element('span','',r.count+' stemmen · '+percentageLabel(r.count,total)));$('#favorite-results').append(card);});if(!total)$('#favorite-results').textContent='Nog geen favorieten gekozen.';
+}
+$('#favorite-form').addEventListener('submit',async e=>{e.preventDefault();if(favoriteBusy||!$('#favorite-select').value)return;favoriteBusy=true;const id=Number($('#favorite-select').value);renderFavorite();try{const response=await siteFetch('/api/favorites',{method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json'},body:JSON.stringify({classId:activeClass,roundId:currentRound,teacherId:id})});const data=await response.json();if(!response.ok)throw new Error(data.error);resultData=data;render();$('#favorite-status').textContent='Jouw favoriet: '+teacherName(id)+'.';}catch(error){$('#favorite-status').textContent=error.message;}finally{favoriteBusy=false;renderFavorite();}});
+$('#year-select').addEventListener('change',async()=>{selectedYear=$('#year-select').value;classDrafts.clear();currentRound=null;resultData=null;submittedRanking=null;teachers.forEach(t=>t.tier='unranked');history=[];duelIndex=0;const url=new URL(location.href);url.searchParams.set('jaar',selectedYear);window.history.replaceState(null,'',url);await fetchResults(true);});
+for(const group of CLASS_GROUPS){const section=element('section','welcome-group');section.append(element('h2','',group.label));const buttons=element('div','welcome-grid');for(const klass of group.classes){const button=element('button','welcome-class',klass.label);button.addEventListener('click',async()=>{welcomeRequired=false;try{localStorage.setItem('docente_class',klass.id);}catch{};if(activeClass===klass.id){renderClassControls();await fetchResults(true);}else await selectClass(klass.id);const url=new URL(location.href);url.searchParams.set('klas',klass.label);window.history.replaceState(null,'',url);});buttons.append(button);}section.append(buttons);$('#welcome-classes').append(section);}
+async function accountRequest(path,body){const response=await siteFetch('/api/account/'+path,{method:body===undefined?'GET':'POST',credentials:'same-origin',headers:body===undefined?{}:{'Content-Type':'application/json'},...(body===undefined?{}:{body:JSON.stringify(body)})});const data=await response.json();if(!response.ok)throw new Error(data.error||'Accountactie mislukt.');return data;}
+function renderAccount(){ $('#account-form').hidden=accountState.authenticated;$('#account-signed-in').hidden=!accountState.authenticated;$('#account-identity').textContent=accountState.email||'';$('#open-account').textContent=accountState.authenticated?'Mijn tierlists':'Inloggen';$('#save-tierlist').disabled=accountBusy||!votingReady||!!resultData?.archived;$('#load-tierlist').disabled=accountBusy||!votingReady;}
+$('#open-account').addEventListener('click',()=>{$('#account-dialog').showModal();});$('#close-account').addEventListener('click',()=>$('#account-dialog').close());
+async function authenticateMember(path){if(accountBusy)return;if(!$('#account-form').reportValidity())return;accountBusy=true;$('#account-status').textContent='Even wachten…';try{accountState=await accountRequest(path,{email:$('#account-email').value,password:$('#account-password').value});$('#account-password').value='';$('#account-status').textContent='Je bent ingelogd. Je kunt je tierlist nu bewaren.';renderAccount();}catch(error){$('#account-status').textContent=error.message;}finally{accountBusy=false;renderAccount();}}
+$('#account-form').addEventListener('submit',e=>{e.preventDefault();authenticateMember('login');});$('#register-account').addEventListener('click',()=>authenticateMember('register'));
+$('#logout-account').addEventListener('click',async()=>{try{accountState=await accountRequest('logout',{});renderAccount();$('#account-status').textContent='Uitgelogd.';}catch(error){$('#account-status').textContent=error.message;}});
+$('#save-tierlist').addEventListener('click',async()=>{if(!accountState.authenticated){$('#account-dialog').showModal();return;}accountBusy=true;renderAccount();try{await accountRequest('tierlist',{classId:activeClass,ranking:currentRanking()});$('#tierlist-status').textContent='Tierlist bewaard voor '+classLabel(activeClass)+' · '+selectedYear+'. Je stem is niet gewijzigd.';}catch(error){$('#tierlist-status').textContent=error.message;}finally{accountBusy=false;renderAccount();}});
+$('#load-tierlist').addEventListener('click',async()=>{if(!accountState.authenticated){$('#account-dialog').showModal();return;}accountBusy=true;renderAccount();try{const data=await accountRequest('tierlist?classId='+encodeURIComponent(activeClass));if(!data.ranking){$('#tierlist-status').textContent='Nog geen tierlist bewaard voor deze klas en dit schooljaar.';return;}snapshot();teachers.forEach(t=>t.tier=data.ranking.find(r=>r.teacherId===t.id).tier);render();$('#tierlist-status').textContent='Bewaarde tierlist geladen. Gebruik Ranking insturen om ermee te stemmen.';}catch(error){$('#tierlist-status').textContent=error.message;}finally{accountBusy=false;renderAccount();}});
+accountRequest('state').then(data=>{accountState=data;renderAccount();}).catch(()=>{$('#account-status').textContent='Account kon niet worden geladen. Vernieuw de pagina om opnieuw te proberen.';});renderAccount();
