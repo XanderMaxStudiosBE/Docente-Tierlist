@@ -13,6 +13,40 @@ const ticketBody=(category='bug')=>({category,classId:'1ITF04',title:'Lokale tes
 const create=async(env,cookie,category)=>{const response=await post(env,'/api/tickets',ticketBody(category),cookie);assert.equal(response.status,201);return (await response.json()).ticket;};
 async function admin(env){env.ADMIN_SETUP_HASH=await digest('test-setup');return cookieOf(await post(env,'/api/admin/setup',{email:'admin@example.test',password:'test-admin-password-long'},'',{Authorization:'Bearer test-setup'}));}
 
+test('Teacher complaints stay private, require a name and appear in the separate admin filter',async()=>{
+ const env={DB:localDatabase()};try{
+  const owner=await member(env),other=await member(env,'other@example.test'),adminCookie=await admin(env);
+  const general=await create(env,owner,'complaint');assert.equal(general.kind,'general');assert.equal(general.teacherName,null);
+  const body={...ticketBody('complaint'),kind:'teacher',teacherName:'  Docent   Test  ',title:'Verzoek over mijn vermelding'};
+  assert.equal((await post(env,'/api/tickets',body)).status,401);
+  for(const change of [{kind:'admin'},{teacherName:''},{teacherName:'x'},{teacherName:23},{teacherName:'x'.repeat(101)},{category:'bug'},{kind:'general'},{accountId:'someone-else'}])assert.equal((await post(env,'/api/tickets',{...body,...change},owner)).status,400);
+  const response=await post(env,'/api/tickets',body,owner);assert.equal(response.status,201);let teacher=(await response.json()).ticket;assert.equal(teacher.kind,'teacher');assert.equal(teacher.teacherName,'Docent Test');assert.equal(teacher.category,'complaint');
+  assert.equal((await get(env,'/api/tickets/'+teacher.id,other)).status,404);assert.equal((await post(env,'/api/tickets/'+teacher.id,{revision:0,message:'Not mine'},other)).status,404);
+  assert.deepEqual((await (await get(env,'/api/tickets?kind=teacher',other)).json()).tickets,[]);
+  const mine=await (await get(env,'/api/tickets?kind=teacher',owner)).json();assert.deepEqual(mine.tickets.map(t=>t.id),[teacher.id]);
+  const standard=await (await get(env,'/api/tickets?kind=general',owner)).json();assert.deepEqual(standard.tickets.map(t=>t.id),[general.id]);
+  assert.equal((await get(env,'/api/tickets?kind=unknown',owner)).status,400);
+  const admins=await (await get(env,'/api/admin/tickets?kind=teacher',adminCookie)).json();assert.deepEqual(admins.tickets.map(t=>t.id),[teacher.id]);assert.equal('account_id' in admins.tickets[0],false);
+  teacher=(await (await post(env,'/api/admin/tickets/'+teacher.id,{revision:0,status:'in_progress',message:'We bekijken je verzoek.'},adminCookie)).json()).ticket;
+  assert.equal(teacher.kind,'teacher');assert.equal(teacher.status,'in_progress');assert.equal(teacher.messages.at(-1).author,'admin');
+  assert.equal((await (await get(env,'/api/tickets/'+teacher.id,owner)).json()).ticket.messages.length,2);
+  assert.equal((await post(env,'/api/tickets/'+teacher.id,{revision:1,message:'Dank je.',kind:'general'},owner)).status,409);
+ }finally{env.DB.close();}
+});
+
+test('Kind filters paginate independently and preserve legacy-style general tickets',async()=>{
+ const env={DB:localDatabase()};try{
+  const owner=await member(env),teacherCookie=await member(env,'teacher@example.test'),general=await create(env,owner);
+  const [accounts]=await env.DB.batch([env.DB.prepare('SELECT id FROM member_accounts WHERE email = ?').bind('teacher@example.test')]);
+  for(let i=0;i<27;i++)await env.DB.batch([env.DB.prepare('INSERT INTO support_tickets (id,account_id,category,kind,teacher_name,title,class_id,school_year,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?)').bind(crypto.randomUUID(),accounts.results[0].id,'complaint','teacher','Docent Test','Klacht '+i,'1ITF04','2026-2027',Date.now()+i,Date.now()+i)]);
+  const first=await (await get(env,'/api/tickets?kind=teacher',teacherCookie)).json();assert.equal(first.tickets.length,25);assert.ok(first.nextCursor);
+  const next=await (await get(env,'/api/tickets?kind=teacher&cursor='+first.nextCursor,teacherCookie)).json();assert.equal(next.tickets.length,2);assert.equal(next.nextCursor,null);
+  assert.equal(new Set([...first.tickets,...next.tickets].map(t=>t.id)).size,27);
+  assert.deepEqual((await (await get(env,'/api/tickets?kind=teacher&cursor='+first.nextCursor,owner)).json()).tickets,[]);
+  assert.deepEqual((await (await get(env,'/api/tickets?kind=general',owner)).json()).tickets.map(t=>t.id),[general.id]);
+ }finally{env.DB.close();}
+});
+
 test('Tickets require an account and never expose another member’s conversation or identity',async()=>{
  const env={DB:localDatabase()};try{
   assert.equal((await get(env,'/api/tickets')).status,401);assert.equal((await post(env,'/api/tickets',ticketBody())).status,401);

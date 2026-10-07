@@ -3,8 +3,8 @@ import {authenticated,digest} from './admin.js';
 import {resolveClass} from '../public/classes.js';
 const ticketJson=(data,status=200)=>Response.json(data,{status,headers:{'Cache-Control':'no-store'}});
 const ticketCategories=['suggestion','complaint','bug'],ticketStatuses=['open','in_progress','closed'];
-const ticketFields='id, account_id, category, title, class_id, school_year, status, created_at, updated_at, revision';
-function ticketRecord(row){return {id:row.id,category:row.category,title:row.title,classId:row.class_id,schoolYear:row.school_year,status:row.status,createdAt:row.created_at,updatedAt:row.updated_at,revision:row.revision};}
+const ticketFields='id, account_id, category, kind, teacher_name, title, class_id, school_year, status, created_at, updated_at, revision';
+function ticketRecord(row){return {id:row.id,category:row.category,kind:row.kind,teacherName:row.teacher_name,title:row.title,classId:row.class_id,schoolYear:row.school_year,status:row.status,createdAt:row.created_at,updatedAt:row.updated_at,revision:row.revision};}
 async function ticketRate(db,account,date,action,limit){const window=Math.floor(date.getTime()/900000)*900,bucket=await digest('tickets:'+action+':'+account.id+':'+window);await db.batch([db.prepare('DELETE FROM admin_attempts WHERE window_start < ?').bind(window-900),db.prepare('INSERT INTO admin_attempts (bucket, attempts, window_start) VALUES (?, 1, ?) ON CONFLICT(bucket) DO UPDATE SET attempts = attempts + 1').bind(bucket,window)]);const [rows]=await db.batch([db.prepare('SELECT attempts FROM admin_attempts WHERE bucket = ?').bind(bucket)]);return rows.results[0].attempts<=limit;}
 async function ticketDetail(db,id,account,admin){const [rows]=await db.batch([db.prepare(`SELECT ${ticketFields} FROM support_tickets WHERE id = ?${admin?'':' AND account_id = ?'}`).bind(id,...(admin?[]:[account.id]))]);if(!rows.results[0])return null;const [messages]=await db.batch([db.prepare('SELECT id, author, message, created_at FROM ticket_messages WHERE ticket_id = ? ORDER BY created_at, id').bind(id)]);return {...ticketRecord(rows.results[0]),messages:messages.results.map(row=>({id:row.id,author:row.author,message:row.message,createdAt:row.created_at}))};}
 export async function handleTickets(request,env,date){
@@ -16,11 +16,12 @@ export async function handleTickets(request,env,date){
   const id=suffix.slice(1);
   if(request.method==='GET'){
    if(id){const ticket=await ticketDetail(db,id,account,admin);return ticket?ticketJson({ticket}):ticketJson({error:'Ticket niet gevonden.'},404);}
-   const status=url.searchParams.get('status')||'all',cursor=url.searchParams.get('cursor');
-   if(status!=='all'&&!ticketStatuses.includes(status)||cursor&&!/^\d{13}:[a-f0-9-]{36}$/.test(cursor))return ticketJson({error:'Ongeldige ticketfilter.'},400);
+   const status=url.searchParams.get('status')||'all',kind=url.searchParams.get('kind')||'all',cursor=url.searchParams.get('cursor');
+   if(status!=='all'&&!ticketStatuses.includes(status)||!['all','general','teacher'].includes(kind)||cursor&&!/^\d{13}:[a-f0-9-]{36}$/.test(cursor))return ticketJson({error:'Ongeldige ticketfilter.'},400);
    const filters=[],bindings=[];
    if(!admin){filters.push('account_id = ?');bindings.push(account.id);}
    if(status!=='all'){filters.push('status = ?');bindings.push(status);}
+   if(kind!=='all'){filters.push('kind = ?');bindings.push(kind);}
    if(cursor){const [time,lastId]=cursor.split(':');filters.push('(created_at < ? OR (created_at = ? AND id < ?))');bindings.push(Number(time),Number(time),lastId);}
    const [rows]=await db.batch([db.prepare(`SELECT ${ticketFields} FROM support_tickets${filters.length?' WHERE '+filters.join(' AND '):''} ORDER BY created_at DESC, id DESC LIMIT 26`).bind(...bindings)]);
    const tickets=rows.results.slice(0,25).map(ticketRecord),last=tickets.at(-1);return ticketJson({tickets,nextCursor:rows.results.length>25?last.createdAt+':'+last.id:null});
@@ -35,10 +36,12 @@ export async function handleTickets(request,env,date){
   if(!id){
    if(admin)return ticketJson({error:'Start een ticket via Feedback.'},405);
    const title=typeof body.title==='string'?body.title.trim():'',classId=resolveClass(body.classId);
-   if(Object.keys(body).some(key=>!['title','message','category','classId'].includes(key))||!classId||!ticketCategories.includes(body.category)||title.length<3||title.length>100||message.length<10||message.length>4000)return ticketJson({error:'Vul een onderwerp (3–100 tekens) en een beschrijving (10–4000 tekens) in.'},400);
+   const kind=body.kind===undefined?'general':body.kind,teacherName=typeof body.teacherName==='string'?body.teacherName.normalize('NFC').trim().replace(/\s+/g,' '):'';
+   if(!['general','teacher'].includes(kind)||kind==='teacher'&&(body.category!=='complaint'||teacherName.length<2||teacherName.length>100)||kind==='general'&&body.teacherName!==undefined)return ticketJson({error:'Vul voor een docentklacht je naam (2–100 tekens) in en kies Klacht.'},400);
+   if(Object.keys(body).some(key=>!['title','message','category','classId','kind','teacherName'].includes(key))||!classId||!ticketCategories.includes(body.category)||title.length<3||title.length>100||message.length<10||message.length>4000)return ticketJson({error:'Vul een onderwerp (3–100 tekens) en een beschrijving (10–4000 tekens) in.'},400);
    if(!await ticketRate(db,account,date,'create',5))return ticketJson({error:'Je hebt al 5 tickets gestart in 15 minuten. Probeer later opnieuw.'},429);
    const ticketId=crypto.randomUUID(),now=date.getTime();await db.batch([
-    db.prepare('INSERT INTO support_tickets (id, account_id, category, title, class_id, school_year, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)').bind(ticketId,account.id,body.category,title,classId,env.YEAR.year,now,now),
+    db.prepare('INSERT INTO support_tickets (id, account_id, category, kind, teacher_name, title, class_id, school_year, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)').bind(ticketId,account.id,body.category,kind,kind==='teacher'?teacherName:null,title,classId,env.YEAR.year,now,now),
     db.prepare('INSERT INTO ticket_messages (id, ticket_id, author, message, created_at) VALUES (?, ?, ?, ?, ?)').bind(crypto.randomUUID(),ticketId,'member',message,now),
    ]);return ticketJson({ticket:await ticketDetail(db,ticketId,account,false)},201);
   }

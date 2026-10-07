@@ -55,9 +55,10 @@ export const memberSessions = sqliteTable('member_sessions', {tokenHash:text('to
 export const savedTierlists = sqliteTable('saved_tierlists', {accountId:text('account_id').notNull(),schoolYear:text('school_year').notNull(),classId:text('class_id').notNull(),ranking:text('ranking').notNull(),teacherNames:text('teacher_names')},t=>[primaryKey({columns:[t.accountId,t.schoolYear,t.classId]})]);
 export const supportTickets = sqliteTable('support_tickets', {
   id:text('id').primaryKey(),accountId:text('account_id').notNull(),category:text('category').notNull(),title:text('title').notNull(),
+  kind:text('kind').notNull().default('general'),teacherName:text('teacher_name'),
   classId:text('class_id').notNull(),schoolYear:text('school_year').notNull(),status:text('status').notNull().default('open'),
   createdAt:integer('created_at').notNull(),updatedAt:integer('updated_at').notNull(),revision:integer('revision').notNull().default(0),lastAction:text('last_action'),
-},t=>[index('idx_tickets_account_created').on(t.accountId,t.createdAt,t.id),index('idx_tickets_status_created').on(t.status,t.createdAt,t.id),
+},t=>[index('idx_tickets_account_created').on(t.accountId,t.createdAt,t.id),index('idx_tickets_status_created').on(t.status,t.createdAt,t.id),index('idx_tickets_kind_created').on(t.kind,t.createdAt,t.id),
   check('ticket_category',sql`${t.category} IN ('suggestion','complaint','bug')`),check('ticket_status',sql`${t.status} IN ('open','in_progress','closed')`)]);
 export const ticketMessages = sqliteTable('ticket_messages', {
   id:text('id').primaryKey(),ticketId:text('ticket_id').notNull(),author:text('author').notNull(),message:text('message').notNull(),createdAt:integer('created_at').notNull(),

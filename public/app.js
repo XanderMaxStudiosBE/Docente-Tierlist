@@ -71,7 +71,7 @@ $('#native-share').addEventListener('click',shareWebsite);
 $('#close-share').addEventListener('click',()=>$('#share-dialog').close());
 $('#copy-share-link').addEventListener('click',copyWebsiteLink);
 $('#share-link').addEventListener('click',()=>$('#share-link').select());
-const latestUpdate='2026-10-07-feedback-tickets';
+const latestUpdate='2026-10-07-docentklachten';
 let seenUpdate='';try{seenUpdate=localStorage.getItem('docente_changelog_seen')||'';}catch{}
 function renderUpdateBadge(){const unread=seenUpdate!==latestUpdate;$('#updates-badge').hidden=!unread;$('#open-updates').setAttribute('aria-label',unread?'Updates bekijken, nieuwe updates':'Updates bekijken');}
 $('#open-updates').addEventListener('click',()=>{$('#updates-dialog').showModal();seenUpdate=latestUpdate;try{localStorage.setItem('docente_changelog_seen',latestUpdate);}catch{}renderUpdateBadge();});

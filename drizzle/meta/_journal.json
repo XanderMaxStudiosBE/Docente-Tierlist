@@ -64,6 +64,13 @@
       "when": 1791399960930,
       "tag": "0008_mighty_kid_colt",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "6",
+      "when": 1791402430534,
+      "tag": "0009_spicy_gorilla_man",
+      "breakpoints": true
     }
   ]
 }
