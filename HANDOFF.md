@@ -42,13 +42,15 @@ De eigenaar heeft `docente-ranking-thomasmoregeel.eu` gekocht. Alleen het hoofdd
 
 De eigenaar heeft de twee A-records voor het hoofddomein ingesteld op `162.159.143.30` en `172.66.3.26`, het oude AAAA-record voor het hoofddomein verwijderd en de TXT-verificatierecords van Sites toegevoegd. De TXT-records zijn zichtbaar geworden. De eigenaar heeft daarna de TTL verlaagd; bevestig de actuele records bij een vervolgcontrole.
 
-Laatste controle: provider_status `active`, maar Site-status `pending` en ssl_status `pending_validation`. De nameservers van Vimexx waren nog niet gelijk bijgewerkt. Vimexx toonde daarna de melding dat de wijziging binnen 2 tot 4 uur actief wordt. Dit is geen actuele garantie: vernieuw de domeinstatus via Sites voordat je een conclusie trekt. `www` staat nog op Vimexx en is niet gekoppeld.
+Controle op 7 oktober 2026 om 16:43 Belgische tijd: domeinstatus, provider_status en ssl_status zijn alle drie `active`. Het hoofddomein geeft via HTTPS een succesvolle HTTP 200 terug. `www` staat nog op Vimexx en is niet gekoppeld.
 
 ## Volgende cloudchat
 
 ## Toegevoegde functies op 7 oktober 2026
 
 Nieuwe bezoekers kiezen hun klas op het beginscherm. Alleen deze apparaatvoorkeur wordt in localStorage onthouden. Elke klas heeft een aparte favoriete-docentstem per browser en stemronde; de uitslag blijft blind totdat de tierlist is ingestuurd.
+
+De knop Delen rechtsboven is ook op het beginscherm beschikbaar. Hij opent een venster met Link kopiëren en, waar ondersteund, Via app delen voor het native deelmenu. Deel alleen de publieke hoofddomeinlink https://docente-ranking-thomasmoregeel.eu/, zonder account-, ranking- of URL-gegevens van de bezoeker.
 
 Schooljaar 2026-2027 bevat de bestaande data. Admins kunnen het volgende schooljaar starten; oude jaren blijven alleen leesbaar en hebben eigen namen en stemmen. `worker/features.js` namespaceert voor latere jaren de opgeslagen class_id met `YEAR:`, zonder de externe IDs te wijzigen. Ook voterhashes zijn per jaar gescheiden. Deze adapter is essentieel voor alle queries in de bestaande stem- en klastabellen.
 

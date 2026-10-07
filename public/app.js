@@ -36,6 +36,37 @@ const $ = selector=>document.querySelector(selector);
 const grip = '<svg class="grip" viewBox="0 0 12 18" aria-hidden="true" fill="currentColor" stroke="none"><circle cx="3" cy="4" r="1"/><circle cx="9" cy="4" r="1"/><circle cx="3" cy="9" r="1"/><circle cx="9" cy="9" r="1"/><circle cx="3" cy="14" r="1"/><circle cx="9" cy="14" r="1"/></svg>';
 function announce(message){$('#announcement').textContent=message;}
 function notify(message){const toast=$('#toast');toast.textContent=message;toast.hidden=false;clearTimeout(toastTimer);toastTimer=setTimeout(()=>{toast.hidden=true;},2600);}
+const websiteShare={title:'Docente Ranking',text:'Wie verdient een S? Rank jouw docenten op Docente Ranking.',url:'https://docente-ranking-thomasmoregeel.eu/'};
+function openShareDialog(){
+  $('#share-link').value=websiteShare.url;
+  $('#share-status').textContent='';
+  $('#share-dialog').showModal();
+}
+async function shareWebsite(){
+  if(typeof navigator.share!=='function'){openShareDialog();return;}
+  const button=$('#native-share');button.disabled=true;
+  try{await navigator.share(websiteShare);}
+  catch(error){if(error.name!=='AbortError')$('#share-status').textContent='Het deelmenu is niet beschikbaar. Gebruik Link kopiëren.';}
+  finally{button.disabled=false;}
+}
+async function copyWebsiteLink(){
+  const button=$('#copy-share-link');button.disabled=true;
+  try{
+    if(!navigator.clipboard?.writeText)throw new Error('Clipboard unavailable');
+    await navigator.clipboard.writeText(websiteShare.url);
+    $('#share-status').textContent='Link gekopieerd. Plak hem in je bericht.';
+    notify('Link naar de website gekopieerd.');
+  }catch{
+    $('#share-link').focus();$('#share-link').select();
+    $('#share-status').textContent='Kopiëren lukt niet automatisch. Kopieer de geselecteerde link of houd hem ingedrukt op je telefoon.';
+  }finally{button.disabled=false;}
+}
+$('#native-share').hidden=typeof navigator.share!=='function';
+$('#share-website').addEventListener('click',openShareDialog);
+$('#native-share').addEventListener('click',shareWebsite);
+$('#close-share').addEventListener('click',()=>$('#share-dialog').close());
+$('#copy-share-link').addEventListener('click',copyWebsiteLink);
+$('#share-link').addEventListener('click',()=>$('#share-link').select());
 function snapshot(){history.push(teachers.map(t=>({...t})));if(history.length>50)history.shift();}
 function renderClassControls(){
   const archived=!!resultData?.archived;
@@ -379,7 +410,7 @@ $('#duel-next').addEventListener('click',()=>{duelIndex=Math.min(pairs.length-1,
 $('#export-ranking').addEventListener('click',()=>downloadRanking().catch(()=>{}));
 $('#close-export').addEventListener('click',()=>$('#export-dialog').close());
 $('#export-dialog').addEventListener('close',()=>{if(exportUrl)URL.revokeObjectURL(exportUrl);exportUrl=null;$('#export-image').removeAttribute('src');$('#save-image').removeAttribute('href');});
-document.addEventListener('keydown',event=>{if(event.ctrlKey || event.metaKey || event.altKey || event.repeat || event.target.matches('input,textarea,select,[contenteditable]') || $('#names-dialog').open || $('#export-dialog').open)return;const tier=event.key.toUpperCase();if(selectedId!==null && tiers.includes(tier)){event.preventDefault();moveTeacher(selectedId,tier);}});
+document.addEventListener('keydown',event=>{if(event.ctrlKey || event.metaKey || event.altKey || event.repeat || event.target.matches('input,textarea,select,[contenteditable]') || document.querySelector('dialog[open]'))return;const tier=event.key.toUpperCase();if(selectedId!==null && tiers.includes(tier)){event.preventDefault();moveTeacher(selectedId,tier);}});
 const liveTimer=setInterval(()=>{if(!welcomeRequired&&document.visibilityState==='visible' && !$('#names-dialog').open && !$('#export-dialog').open)fetchResults(false,true);},30000);
 document.addEventListener('visibilitychange',()=>{if(!welcomeRequired&&document.visibilityState==='visible')fetchResults(false,true);});
 window.addEventListener('pagehide',()=>clearInterval(liveTimer),{once:true});
