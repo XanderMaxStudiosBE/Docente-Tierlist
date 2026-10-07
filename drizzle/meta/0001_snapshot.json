@@ -1,0 +1,84 @@
+{
+  "version": "6",
+  "dialect": "sqlite",
+  "id": "0d752c6c-dd93-48f9-b1b0-e27400571d97",
+  "prevId": "b9b60867-c592-4857-8829-4763b7cdd0c3",
+  "tables": {
+    "votes": {
+      "name": "votes",
+      "columns": {
+        "voter_id": {
+          "name": "voter_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "teacher_id": {
+          "name": "teacher_id",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "tier": {
+          "name": "tier",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "round_id": {
+          "name": "round_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "'initial'"
+        }
+      },
+      "indexes": {
+        "idx_votes_round_teacher_tier": {
+          "name": "idx_votes_round_teacher_tier",
+          "columns": [
+            "round_id",
+            "teacher_id",
+            "tier"
+          ],
+          "isUnique": false
+        }
+      },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {
+        "votes_voter_id_teacher_id_pk": {
+          "columns": [
+            "voter_id",
+            "teacher_id"
+          ],
+          "name": "votes_voter_id_teacher_id_pk"
+        }
+      },
+      "uniqueConstraints": {},
+      "checkConstraints": {
+        "valid_teacher": {
+          "name": "valid_teacher",
+          "value": "\"votes\".\"teacher_id\" BETWEEN 1 AND 7"
+        },
+        "valid_tier": {
+          "name": "valid_tier",
+          "value": "\"votes\".\"tier\" IN ('S','A','B','C','D','E','F')"
+        }
+      }
+    }
+  },
+  "views": {},
+  "enums": {},
+  "_meta": {
+    "schemas": {},
+    "tables": {},
+    "columns": {}
+  },
+  "internal": {
+    "indexes": {}
+  }
+}
