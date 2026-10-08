@@ -3,10 +3,31 @@ import assert from 'node:assert/strict';
 import {createWorker} from '../worker/index.js';
 import {digest} from '../worker/admin.js';
 import {localDatabase} from './local-db.mjs';
+import {createTierlistRestorer} from '../public/tierlist-restore.js';
 const origin='https://ranking.test',worker=createWorker({});
 const ranks=tier=>Array.from({length:7},(_,i)=>({teacherId:i+1,tier:tier==='S'&&i>0?'A':tier}));
 async function get(env,path,cookie=''){return worker.fetch(new Request(origin+path,{headers:{cookie}}),env);}
 async function post(env,path,body,cookie='',extra={}){return worker.fetch(new Request(origin+path,{method:'POST',headers:{origin,cookie,'content-type':'application/json',...extra},body:JSON.stringify(body)}),env);}
+
+test('A signed-in account restores its saved submission with a fresh browser cookie without casting another vote',async()=>{
+ const env={DB:localDatabase()};try{
+  const login={email:'restore@example.test',password:'restore-test-password-long'};
+  const member=(await post(env,'/api/account/register',login)).headers.get('set-cookie').split(';')[0];
+  const first=await get(env,'/api/results',member),voter=first.headers.get('set-cookie').split(';')[0],initial=await first.json();
+  const submitted=await (await post(env,'/api/votes',{classId:'1ITF04',roundId:initial.roundId,rankings:ranks('S')},member+'; '+voter)).json();assert.equal(submitted.accountSaved,true);
+  await post(env,'/api/account/logout',{},member);
+  const nextMember=(await post(env,'/api/account/login',login)).headers.get('set-cookie').split(';')[0];
+  const next=await get(env,'/api/results',nextMember),nextVoter=next.headers.get('set-cookie').split(';')[0],data=await next.json();
+  assert.deepEqual(data.myRanking,[]);assert.equal(data.blind,true);
+  let restored=null;
+  const restorer=createTierlistRestorer({getState:()=>({accountKey:login.email,classId:data.classId,year:data.year,roundId:data.roundId,teacherNames:data.teacherNames,ready:true,pristine:true,revision:0}),load:async()=>{
+    const response=await get(env,'/api/account/tierlist?classId='+data.classId+'&year='+data.year,nextMember);assert.equal(response.status,200);return response.json();
+  },onResult:value=>restored=value.ranking,onError:error=>{throw error;}});
+  assert.equal(await restorer.restore(),'loaded');assert.deepEqual(restored,ranks('S'));
+  const after=await (await get(env,'/api/results',nextMember+'; '+nextVoter)).json();assert.deepEqual(after.myRanking,[]);assert.equal(after.blind,true);
+  const [count]=await env.DB.batch([env.DB.prepare('SELECT COUNT(DISTINCT voter_id) AS voters FROM votes')]);assert.equal(count.results[0].voters,1);
+ }finally{env.DB.close();}
+});
 test('Favorites update one choice, remain class-scoped, stay blind and reset with the round',async()=>{
  const env={DB:localDatabase(),ADMIN_SETUP_HASH:await digest('test-setup')};try{
   let response=await get(env,'/api/results');const cookie=response.headers.get('set-cookie').split(';')[0],round=(await response.json()).roundId;

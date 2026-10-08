@@ -1,6 +1,6 @@
 import { mkdir,readFile,writeFile,cp } from 'node:fs/promises';
 const assets={};
-for(const name of ['index.html','style.css','app.js','admin.html','admin.js','classes.js','tickets.js'])assets['/'+name]=await readFile(new URL('../public/'+name,import.meta.url),'utf8');
+for(const name of ['index.html','style.css','app.js','admin.html','admin.js','classes.js','tickets.js','tierlist-restore.js'])assets['/'+name]=await readFile(new URL('../public/'+name,import.meta.url),'utf8');
 assets['/favicon.png']={base64:(await readFile(new URL('../public/favicon.png',import.meta.url))).toString('base64'),type:'image/png'};
 const classes=assets['/classes.js'];
 const admin=(await readFile(new URL('../worker/admin.js',import.meta.url),'utf8')).replace(/^import .*;\r?\n/gm,'');

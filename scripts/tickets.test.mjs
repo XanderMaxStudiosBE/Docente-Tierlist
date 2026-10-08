@@ -3,7 +3,10 @@ import assert from 'node:assert/strict';
 import {createWorker} from '../worker/index.js';
 import {digest} from '../worker/admin.js';
 import {localDatabase} from './local-db.mjs';
-const origin='https://ranking.test',worker=createWorker({});
+// Give sequential actions distinct timestamps instead of depending on whether
+// a fast test happens to create and answer a ticket in the same millisecond.
+let ticketTestClock=Date.now();
+const origin='https://ranking.test',worker=createWorker({},()=>new Date(++ticketTestClock));
 const ranks=tier=>Array.from({length:7},(_,i)=>({teacherId:i+1,tier:tier==='S'&&i>0?'A':tier}));
 const cookieOf=response=>response.headers.get('set-cookie').split(';')[0];
 const get=(env,path,cookie='',server=worker)=>server.fetch(new Request(origin+path,{headers:{cookie}}),env);

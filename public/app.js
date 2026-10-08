@@ -1,5 +1,6 @@
 import {CLASS_GROUPS,CLASS_IDS,DEFAULT_CLASS,DEFAULT_TEACHER_NAMES,MAX_TEACHERS,validTeacherNames,classLabel,resolveClass} from './classes.js';
 import {createTicketDesk} from './tickets.js';
+import {createTierlistRestorer} from './tierlist-restore.js';
 'use strict';
 const tiers = ['S','A','B','C','D','F'];
 const tierColors = ['#f58e98','#f3ac83','#f1cf7b','#d7e888','#99d6b7','#bcaaeb'];
@@ -11,6 +12,7 @@ let preferredClass=null;try{preferredClass=localStorage.getItem('docente_class')
 let welcomeRequired=!resolveClass(preferredClass);
 let selectedYear=new URLSearchParams(location.search).get('jaar')||'';
 let accountState={authenticated:false},accountBusy=false,favoriteBusy=false;
+let accountEpoch=0,boardRevision=0,boardEdited=false;
 const siteFetch=(path,options)=>{const url=new URL(path,location.origin);if(selectedYear)url.searchParams.set('year',selectedYear);return fetch(url,options);};
 const requestedClass=new URLSearchParams(location.search).get('klas');
 let activeClass=resolveClass(requestedClass)||resolveClass(preferredClass)||DEFAULT_CLASS;
@@ -35,7 +37,19 @@ let sendingDuel=false;
 let duelIndex=0;
 let pairs=teachers.flatMap(a=>teachers.filter(b=>b.id>a.id).map(b=>({leftId:a.id,rightId:b.id})));
 const $ = selector=>document.querySelector(selector);
-const feedbackDesk=createTicketDesk({root:$('#feedback-view'),getContext:()=>({classId:activeClass,year:selectedYear}),onLogin:()=>$('#account-dialog').showModal(),onAuthExpired:()=>{accountState={authenticated:false};renderAccount();},request:async(path,body)=>{
+const accountRestorer=createTierlistRestorer({
+  getState:()=>({accountKey:accountState.authenticated?accountState.email+':'+accountEpoch:null,classId:activeClass,year:selectedYear,roundId:currentRound,teacherNames:teachers.map(t=>t.name),revision:boardRevision,ready:!welcomeRequired&&classConfigured&&votingReady&&!loadingResults&&!accountBusy&&!sendingVote&&!savingNames,pristine:!boardEdited&&!history.length&&teachers.every(t=>t.tier==='unranked')}),
+  load:context=>accountRequest('tierlist?classId='+encodeURIComponent(context.classId)),
+  onResult:(data,context)=>{
+    if(data.kind==='loaded'){
+      boardRevision++;teachers.forEach(t=>t.tier=data.ranking.find(row=>row.teacherId===t.id).tier);selectedId=null;history=[];render();
+      $('#tierlist-status').textContent='Bewaarde tierlist automatisch geladen voor '+classLabel(context.classId)+' · '+context.year+'. Laden brengt geen stem uit.';
+      announce('Je bewaarde tierlist is teruggeladen.');
+    }else $('#tierlist-status').textContent=data.kind==='outdated'?'De docentlijst is veranderd. Je oude tierlist blijft bewaard, maar past niet bij deze docenten.':data.kind==='missing'?'Nog geen tierlist bewaard in dit account voor '+classLabel(context.classId)+' · '+context.year+'.':'Je bewaarde tierlist kon niet worden teruggeladen.';
+  },
+  onError:()=>{$('#tierlist-status').textContent='Je bewaarde tierlist kon niet worden geladen. Gebruik Bewaarde tierlist laden om opnieuw te proberen.';}
+});
+const feedbackDesk=createTicketDesk({root:$('#feedback-view'),getContext:()=>({classId:activeClass,year:selectedYear}),onLogin:()=>$('#account-dialog').showModal(),onAuthExpired:()=>setAccountState({authenticated:false}),request:async(path,body)=>{
   const response=await siteFetch(path,{method:body===undefined?'GET':'POST',credentials:'same-origin',...(body===undefined?{}:{headers:{'Content-Type':'application/json'},body:JSON.stringify(body)})});const data=await response.json();if(!response.ok){const error=new Error(data.error||'Ticketactie mislukt.');error.status=response.status;throw error;}return data;
 }});
 const grip = '<svg class="grip" viewBox="0 0 12 18" aria-hidden="true" fill="currentColor" stroke="none"><circle cx="3" cy="4" r="1"/><circle cx="9" cy="4" r="1"/><circle cx="3" cy="9" r="1"/><circle cx="9" cy="9" r="1"/><circle cx="3" cy="14" r="1"/><circle cx="9" cy="14" r="1"/></svg>';
@@ -72,13 +86,13 @@ $('#native-share').addEventListener('click',shareWebsite);
 $('#close-share').addEventListener('click',()=>$('#share-dialog').close());
 $('#copy-share-link').addEventListener('click',copyWebsiteLink);
 $('#share-link').addEventListener('click',()=>$('#share-link').select());
-const latestUpdate='2026-10-07-header-favorieten';
+const latestUpdate='2026-10-08-account-herstel';
 let seenUpdate='';try{seenUpdate=localStorage.getItem('docente_changelog_seen')||'';}catch{}
 function renderUpdateBadge(){const unread=seenUpdate!==latestUpdate;$('#updates-badge').hidden=!unread;$('#open-updates').setAttribute('aria-label',unread?'Updates bekijken, nieuwe updates':'Updates bekijken');}
 $('#open-updates').addEventListener('click',()=>{$('#updates-dialog').showModal();seenUpdate=latestUpdate;try{localStorage.setItem('docente_changelog_seen',latestUpdate);}catch{}renderUpdateBadge();});
 $('#close-updates').addEventListener('click',()=>$('#updates-dialog').close());
 renderUpdateBadge();
-function snapshot(){history.push(teachers.map(t=>({...t})));if(history.length>50)history.shift();}
+function snapshot(){boardEdited=true;boardRevision++;history.push(teachers.map(t=>({...t})));if(history.length>50)history.shift();}
 function renderClassControls(){
   const archived=!!resultData?.archived;
   $('#year-select').disabled=loadingResults||sendingVote||sendingDuel||savingNames||favoriteBusy||accountBusy;
@@ -113,9 +127,9 @@ async function selectClass(classId){
   if(!classes.includes(classId))throw new Error('Onbekende klas.');
   if(loadingResults || sendingVote || sendingDuel || savingNames||favoriteBusy||accountBusy)throw new Error('Wacht tot de huidige bewerking klaar is.');
   if(classId===activeClass)return {classId:activeClass,configured:classConfigured};
-  classDrafts.set(activeClass,{teachers:teachers.map(t=>({...t})),history,duelIndex,round:currentRound});
-  activeClass=classId;try{localStorage.setItem('docente_class',classId);}catch{};resultScope='class';selectedId=null;draggedId=null;resultData=null;submittedRanking=null;votingReady=false;classConfigured=classId===DEFAULT_CLASS;
-  const draft=classDrafts.get(classId);teachers.splice(0,teachers.length,...(draft?.teachers||teacherNames.map((name,i)=>({id:i+1,name,tier:'unranked'}))));history=draft?.history||[];duelIndex=draft?.duelIndex||0;currentRound=draft?.round||null;
+  classDrafts.set(activeClass,{teachers:teachers.map(t=>({...t})),history,duelIndex,round:currentRound,boardEdited});
+  boardRevision++;$('#tierlist-status').textContent='';activeClass=classId;try{localStorage.setItem('docente_class',classId);}catch{};resultScope='class';selectedId=null;draggedId=null;resultData=null;submittedRanking=null;votingReady=false;classConfigured=classId===DEFAULT_CLASS;
+  const draft=classDrafts.get(classId);teachers.splice(0,teachers.length,...(draft?.teachers||teacherNames.map((name,i)=>({id:i+1,name,tier:'unranked'}))));history=draft?.history||[];boardEdited=draft?.boardEdited||false;duelIndex=draft?.duelIndex||0;currentRound=draft?.round||null;
   const url=new URL(location.href);url.searchParams.set('klas',classLabel(classId));window.history.replaceState(null,'',url);
   $('#community-content').hidden=true;$('#blind-message').hidden=false;$('#results-table').replaceChildren();$('#results-status').textContent='Stemmen van '+classLabel(classId)+' laden…';
   render();await fetchResults(!draft);announce('Klas '+classLabel(classId)+' geselecteerd.');return {classId:activeClass,configured:classConfigured};
@@ -125,7 +139,7 @@ function applyClassData(data){
   classConfigured=data.configured;
   const previous=teachers.map(t=>({...t}));
   teachers.splice(0,teachers.length,...(data.teacherNames||[]).map((name,i)=>({id:i+1,name,tier:previous[i]?.name===name?previous[i].tier:'unranked'})));
-  if(previous.map(t=>t.name).join('\0')!==teachers.map(t=>t.name).join('\0')){history=[];selectedId=null;}
+  if(previous.map(t=>t.name).join('\0')!==teachers.map(t=>t.name).join('\0')){history=[];selectedId=null;boardRevision++;boardEdited=false;}
   pairs=teachers.flatMap(a=>teachers.filter(b=>b.id>a.id).map(b=>({leftId:a.id,rightId:b.id})));duelIndex=Math.max(0,Math.min(duelIndex,pairs.length-1));
 }
 function openNames(){
@@ -369,8 +383,8 @@ async function fetchResults(restore=false,silent=false){
     const newRound=currentRound!==null && currentRound!==data.roundId;
     selectedYear=data.year;const yearSelect=$('#year-select');yearSelect.replaceChildren();for(const year of data.years){const option=element('option','',year+(year===data.currentYear?' · actief':' · archief'));option.value=year;yearSelect.append(option);}yearSelect.value=selectedYear;
     currentRound=data.roundId;resultData=data;votingReady=true;submittedRanking=teachers.length>0&&data.myRanking.length===teachers.length?data.myRanking:null;
-    if(newRound){teachers.forEach(t=>t.tier='unranked');selectedId=null;history=[];duelIndex=0;render();notify('Een nieuwe stemronde is gestart. Iedereen begint opnieuw.');}
-    if(restore && submittedRanking && teachers.every(t=>t.tier==='unranked')){teachers.forEach(t=>t.tier=submittedRanking.find(row=>row.teacherId===t.id).tier);render();}
+    if(newRound){boardRevision++;boardEdited=false;teachers.forEach(t=>t.tier='unranked');selectedId=null;history=[];duelIndex=0;render();notify('Een nieuwe stemronde is gestart. Iedereen begint opnieuw.');}
+    if(restore && !boardEdited && submittedRanking && teachers.every(t=>t.tier==='unranked')){teachers.forEach(t=>t.tier=submittedRanking.find(row=>row.teacherId===t.id).tier);render();}
     render();updateVotingControls();$('#results-status').textContent=data.blind?'Blind stemmen: stuur je ranking voor '+classLabel(activeClass)+' in om de uitslag te zien.':'De ingestuurde stemmen zijn bijgewerkt.';
   }catch{
     if(!resultData){$('#results-status').textContent=location.protocol==='file:'?'Open de online website om de stemmen van iedereen te zien.':'De stemmen zijn tijdelijk niet beschikbaar. Klik op Vernieuwen om opnieuw te proberen.';}
@@ -391,7 +405,7 @@ async function submitVote(){
   finally{sendingVote=false;updateVotingControls();if(refreshRound)await fetchResults();}
 }
 bindDrop($('#pool'),'unranked');
-$('#undo').addEventListener('click',()=>{if(!history.length)return;const prior=history.pop();teachers.splice(0,teachers.length,...prior);selectedId=null;render();notify('Laatste wijziging ongedaan gemaakt.');});
+$('#undo').addEventListener('click',()=>{if(!history.length)return;boardEdited=true;boardRevision++;const prior=history.pop();teachers.splice(0,teachers.length,...prior);selectedId=null;render();notify('Laatste wijziging ongedaan gemaakt.');});
 $('#reset').addEventListener('click',()=>{if(!teachers.some(t=>t.tier!=='unranked'))return;snapshot();teachers.forEach(t=>t.tier='unranked');selectedId=null;render();notify('Iedereen staat weer klaar. Je kunt dit ongedaan maken.');});
 document.addEventListener('keydown',event=>{if(event.key==='Escape' && !document.querySelector('dialog[open]')){const previous=selectedId;selectedId=null;render();if(previous)document.querySelector(`.teacher[data-id="${previous}"]`)?.focus({preventScroll:true});}});
 $('#setup-teachers').addEventListener('click',openNames);
@@ -458,14 +472,16 @@ function renderFavorite(){
  rows.slice().sort((a,b)=>b.count-a.count||a.teacher_id-b.teacher_id).forEach(r=>{const card=element('article','favorite-result');card.append(element('strong','',teacherName(r.teacher_id)),element('span','',r.count+' stemmen · '+percentageLabel(r.count,total)));$('#favorite-results').append(card);});if(!total)$('#favorite-results').textContent='Nog geen favorieten gekozen.';
 }
 $('#favorite-form').addEventListener('submit',async e=>{e.preventDefault();if(favoriteBusy||!$('#favorite-select').value)return;favoriteBusy=true;const id=Number($('#favorite-select').value);renderFavorite();try{const response=await siteFetch('/api/favorites',{method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json'},body:JSON.stringify({classId:activeClass,roundId:currentRound,teacherId:id})});const data=await response.json();if(!response.ok)throw new Error(data.error);resultData=data;render();$('#favorite-status').textContent='Jouw favoriet: '+teacherName(id)+'.';}catch(error){$('#favorite-status').textContent=error.message;}finally{favoriteBusy=false;renderFavorite();}});
-$('#year-select').addEventListener('change',async()=>{selectedYear=$('#year-select').value;classDrafts.clear();currentRound=null;resultData=null;submittedRanking=null;teachers.forEach(t=>t.tier='unranked');history=[];duelIndex=0;const url=new URL(location.href);url.searchParams.set('jaar',selectedYear);window.history.replaceState(null,'',url);await fetchResults(true);});
+$('#year-select').addEventListener('change',async()=>{boardRevision++;boardEdited=false;$('#tierlist-status').textContent='';selectedYear=$('#year-select').value;classDrafts.clear();currentRound=null;resultData=null;submittedRanking=null;teachers.forEach(t=>t.tier='unranked');history=[];duelIndex=0;const url=new URL(location.href);url.searchParams.set('jaar',selectedYear);window.history.replaceState(null,'',url);await fetchResults(true);});
 for(const group of CLASS_GROUPS){const section=element('section','welcome-group');section.append(element('h2','',group.label));const buttons=element('div','welcome-grid');for(const klass of group.classes){const button=element('button','welcome-class',klass.label);button.addEventListener('click',async()=>{welcomeRequired=false;try{localStorage.setItem('docente_class',klass.id);}catch{};if(activeClass===klass.id){renderClassControls();await fetchResults(true);}else await selectClass(klass.id);const url=new URL(location.href);url.searchParams.set('klas',klass.label);window.history.replaceState(null,'',url);});buttons.append(button);}section.append(buttons);$('#welcome-classes').append(section);}
 async function accountRequest(path,body){const response=await siteFetch('/api/account/'+path,{method:body===undefined?'GET':'POST',credentials:'same-origin',headers:body===undefined?{}:{'Content-Type':'application/json'},...(body===undefined?{}:{body:JSON.stringify(body)})});const data=await response.json();if(!response.ok)throw new Error(data.error||'Accountactie mislukt.');return data;}
-function renderAccount(){ $('#account-form').hidden=accountState.authenticated;$('#account-signed-in').hidden=!accountState.authenticated;$('#account-identity').textContent=accountState.email||'';$('#open-account').textContent=accountState.authenticated?'Mijn tierlists':'Inloggen';$('#save-tierlist').disabled=accountBusy||!votingReady||!!resultData?.archived;$('#load-tierlist').disabled=accountBusy||!votingReady;feedbackDesk.setAccount(accountState);}
+function setAccountState(data){accountState=data;accountEpoch++;renderAccount();}
+function renderAccount(){ $('#account-form').hidden=accountState.authenticated;$('#account-signed-in').hidden=!accountState.authenticated;$('#account-identity').textContent=accountState.email||'';$('#open-account').textContent=accountState.authenticated?'Mijn tierlists':'Inloggen';$('#save-tierlist').disabled=accountBusy||!votingReady||!!resultData?.archived;$('#load-tierlist').disabled=accountBusy||!votingReady;feedbackDesk.setAccount(accountState);void accountRestorer.restore();}
 $('#open-account').addEventListener('click',()=>{$('#account-dialog').showModal();});$('#close-account').addEventListener('click',()=>$('#account-dialog').close());
-async function authenticateMember(path){if(accountBusy)return;if(!$('#account-form').reportValidity())return;accountBusy=true;$('#account-status').textContent='Even wachten…';try{accountState=await accountRequest(path,{email:$('#account-email').value,password:$('#account-password').value});$('#account-password').value='';$('#account-status').textContent='Je bent ingelogd. Je kunt je tierlist nu bewaren.';renderAccount();}catch(error){$('#account-status').textContent=error.message;}finally{accountBusy=false;renderAccount();}}
+async function authenticateMember(path){if(accountBusy)return;if(!$('#account-form').reportValidity())return;accountBusy=true;$('#account-status').textContent='Even wachten…';try{setAccountState(await accountRequest(path,{email:$('#account-email').value,password:$('#account-password').value}));$('#account-password').value='';$('#account-status').textContent='Je bent ingelogd. Je kunt je tierlist nu bewaren.';renderAccount();}catch(error){$('#account-status').textContent=error.message;}finally{accountBusy=false;renderAccount();}}
 $('#account-form').addEventListener('submit',e=>{e.preventDefault();authenticateMember('login');});$('#register-account').addEventListener('click',()=>authenticateMember('register'));
-$('#logout-account').addEventListener('click',async()=>{try{accountState=await accountRequest('logout',{});renderAccount();$('#account-status').textContent='Uitgelogd.';}catch(error){$('#account-status').textContent=error.message;}});
+$('#logout-account').addEventListener('click',async()=>{try{setAccountState(await accountRequest('logout',{}));$('#account-status').textContent='Uitgelogd.';}catch(error){$('#account-status').textContent=error.message;}});
 $('#save-tierlist').addEventListener('click',async()=>{if(!accountState.authenticated){$('#account-dialog').showModal();return;}accountBusy=true;renderAccount();try{await accountRequest('tierlist',{classId:activeClass,ranking:currentRanking()});$('#tierlist-status').textContent='Tierlist bewaard voor '+classLabel(activeClass)+' · '+selectedYear+'. Je stem is niet gewijzigd.';}catch(error){$('#tierlist-status').textContent=error.message;}finally{accountBusy=false;renderAccount();}});
 $('#load-tierlist').addEventListener('click',async()=>{if(!accountState.authenticated){$('#account-dialog').showModal();return;}accountBusy=true;renderAccount();try{const data=await accountRequest('tierlist?classId='+encodeURIComponent(activeClass));if(!data.ranking){$('#tierlist-status').textContent=data.outdated?'De docentlijst is veranderd. Maak een nieuwe tierlist; je oude lijst blijft bewaard.':'Nog geen tierlist bewaard voor deze klas en dit schooljaar.';return;}snapshot();teachers.forEach(t=>t.tier=data.ranking.find(r=>r.teacherId===t.id)?.tier||'unranked');render();$('#tierlist-status').textContent='Bewaarde tierlist geladen. Gebruik Ranking insturen om ermee te stemmen.';}catch(error){$('#tierlist-status').textContent=error.message;}finally{accountBusy=false;renderAccount();}});
-accountRequest('state').then(data=>{accountState=data;renderAccount();}).catch(()=>{$('#account-status').textContent='Account kon niet worden geladen. Vernieuw de pagina om opnieuw te proberen.';});renderAccount();
+const initialAccountEpoch=accountEpoch;
+accountRequest('state').then(data=>{if(accountEpoch===initialAccountEpoch)setAccountState(data);}).catch(()=>{$('#account-status').textContent='Account kon niet worden geladen. Vernieuw de pagina om opnieuw te proberen.';});renderAccount();

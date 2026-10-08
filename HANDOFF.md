@@ -67,7 +67,7 @@ De Feedback-tab bevat suggesties, klachten en bugtickets over de website. Ticket
 
 De testsuite bevat nu 27 tests. Het favicon is de door de gebruiker aangeleverde afbeelding, als 64×64 PNG in public/favicon.png. De bouw en preview nemen dit als binary asset op; beide pagina's linken hetzelfde favicon en gebruiken dit ook als logo in de header.
 
-Bij het insturen van een ranking door een ingelogde member slaat de server dezelfde tierlist en docentnamen atomair met de stemmen in het account op. De sleutel blijft account, schooljaar en klas; een gast kan gewoon anoniem stemmen. Alleen een ontwerp handmatig opslaan of laden brengt geen stem uit.
+Bij het insturen van een ranking door een ingelogde member slaat de server dezelfde tierlist en docentnamen atomair met de stemmen in het account op. De sleutel blijft account, schooljaar en klas; een gast kan gewoon anoniem stemmen. Alleen een ontwerp handmatig opslaan of laden brengt geen stem uit. Sinds 8 oktober 2026 wordt een lege, onaangepaste tierlist bij het openen/inloggen en klas- of jaarwissels automatisch uit het account teruggeladen. public/tierlist-restore.js wacht op account- en klasdata, controleert account, klas, jaar, ronde, docentnamen en bordrevision en negeert late antwoorden na edits of contextwissels. Laden blijft een GET en brengt geen stem uit; een ontbrekende of verouderde lijst toont een bericht. Bestaande browserinzendingen en lopende edits worden behouden.
 
 ## Tab Voor docenten
 
