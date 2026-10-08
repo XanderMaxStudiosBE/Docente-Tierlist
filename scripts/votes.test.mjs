@@ -94,13 +94,14 @@ test('All 19 class labels work; new class ballots remain separate and join the o
       if(label==='1itf4'){assert.equal(read.data.classId,'1ITF04');assert.deepEqual(read.data.myRanking,ranks('S'));continue;}
       assert.equal(read.data.configured,false,label);assert.deepEqual(read.data.myRanking,[]);
       const setup=await classPost(env,person.cookie,'/api/classes',label,{teacherNames:names});assert.equal(setup.status,200,label);
-      const vote=await classPost(env,person.cookie,'/api/votes',label,{rankings:ranks('D'),roundId:read.data.roundId});assert.equal(vote.status,200,label);
-      const duel=await classPost(env,person.cookie,'/api/duels',label,{leftId:1,rightId:2,winnerId:2,roundId:read.data.roundId});assert.equal(duel.status,200,label);
-      read=await classRead(env,person.cookie,label);assert.ok(read.data.teachers.every(t=>t.total===1&&t.counts.D===1),label);assert.equal(read.data.myDuels[0].winnerId,2);
+      const classPerson=await visitor(env);
+      const vote=await classPost(env,classPerson.cookie,'/api/votes',label,{rankings:ranks('D'),roundId:read.data.roundId});assert.equal(vote.status,200,label);
+      const duel=await classPost(env,classPerson.cookie,'/api/duels',label,{leftId:1,rightId:2,winnerId:2,roundId:read.data.roundId});assert.equal(duel.status,200,label);
+      read=await classRead(env,classPerson.cookie,label);assert.ok(read.data.teachers.every(t=>t.total===1&&t.counts.D===1),label);assert.equal(read.data.myDuels[0].winnerId,2);
     }
     const read=await classRead(env,person.cookie,'1ITF04');assert.ok(read.data.teachers.every(t=>t.total===1&&t.counts[t.id===1?'S':'A']===1));assert.deepEqual(read.data.myDuels,[]);
     assert.ok(read.data.overall.every(t=>t.total===19&&t.counts[t.id==='lena dillien'?'S':'A']===1&&t.counts.D===18&&t.classes.length===19));
-    for(const legacy of ['1ITF01','1ITF02','1ITF05'])assert.ok((await classRead(env,person.cookie,legacy)).data.myRanking.every(r=>r.tier==='D'));
+    for(const legacy of ['1ITF01','1ITF02','1ITF05'])assert.ok((await classRead(env,person.cookie,legacy)).data.teachers.every(t=>t.counts.D===1));
     assert.equal((await classRead(env,person.cookie,'unknown')).response.status,400);
   }finally{env.DB.close();}
 });
@@ -126,15 +127,17 @@ test('Class votes, duels and weeks remain separate; overall joins teacher names 
     const person=await visitor(env);const four=ranks('A');four[0].tier='S';let data=await (await submit(env,person.cookie,four)).json();
     await duel(env,person.cookie,1,2,1);
     await classPost(env,person.cookie,'/api/classes','1ITF01',{teacherNames:otherNames});
-    let read=await classRead(env,person.cookie,'1ITF01');assert.equal(read.data.blind,true);assert.deepEqual(read.data.myRanking,[]);assert.deepEqual(read.data.myDuels,[]);assert.equal(read.data.votedThisWeek,false);
-    const one=ranks('F');one[1].tier='S';data=await (await classPost(env,person.cookie,'/api/votes','1ITF01',{rankings:one,roundId:ACTIVE_ROUND})).json();assert.ok(data.teachers.every(t=>t.total===1));assert.equal(data.matchScore,null);
+    const second=await visitor(env);
+    const foreign=await classRead(env,person.cookie,'1ITF01');assert.equal(foreign.data.readOnly,true);assert.equal(foreign.data.blind,false);
+    let read=await classRead(env,second.cookie,'1ITF01');assert.equal(read.data.blind,true);assert.deepEqual(read.data.myRanking,[]);assert.deepEqual(read.data.myDuels,[]);assert.equal(read.data.votedThisWeek,false);
+    const one=ranks('F');one[1].tier='S';data=await (await classPost(env,second.cookie,'/api/votes','1ITF01',{rankings:one,roundId:ACTIVE_ROUND})).json();assert.ok(data.teachers.every(t=>t.total===1));assert.equal(data.matchScore,null);
     const lena=data.overall.find(t=>t.id==='lena dillien');assert.equal(lena.total,2);assert.equal(lena.counts.S,2);assert.deepEqual(lena.classes.sort(),['1ITF01','1ITF04']);
     assert.equal(data.overall.find(t=>t.name==='Brent Pulmans').counts.F,1);assert.equal(data.overall.find(t=>t.name==='Brent Pulmans').counts.A,1);assert.equal(data.overall.length,12);
-    await classPost(env,person.cookie,'/api/duels','1ITF01',{leftId:1,rightId:2,winnerId:2,roundId:ACTIVE_ROUND});
+    await classPost(env,second.cookie,'/api/duels','1ITF01',{leftId:1,rightId:2,winnerId:2,roundId:ACTIVE_ROUND});
     data=(await classRead(env,person.cookie,'1ITF04')).data;assert.deepEqual(data.myRanking,four);assert.equal(data.myDuels[0].winnerId,1);assert.equal(data.weeks[0].leaders[0].id,1);assert.equal(data.teachers[0].total,1);
-    await classPost(env,person.cookie,'/api/votes','1ITF01',{rankings:ranks('D'),roundId:ACTIVE_ROUND});
+    await classPost(env,second.cookie,'/api/votes','1ITF01',{rankings:ranks('D'),roundId:ACTIVE_ROUND});
     data=(await classRead(env,person.cookie,'1ITF04')).data;assert.equal(data.teachers[0].counts.S,1);assert.equal(data.overall.find(t=>t.id==='lena dillien').counts.D,1);
-    data=(await classRead(env,person.cookie,'1ITF01')).data;assert.equal(data.myDuels[0].winnerId,2);assert.ok(data.myRanking.every(r=>r.tier==='D'));assert.equal(data.weeks[0].voters,1);assert.equal(data.weeks[0].leaders.length,0);
+    data=(await classRead(env,second.cookie,'1ITF01')).data;assert.equal(data.myDuels[0].winnerId,2);assert.ok(data.myRanking.every(r=>r.tier==='D'));assert.equal(data.weeks[0].voters,1);assert.equal(data.weeks[0].leaders.length,0);
     assert.equal((await classRead(env,person.cookie,'1ITF05')).data.configured,false);
   }finally{env.DB.close();}
 });

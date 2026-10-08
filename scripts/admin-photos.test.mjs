@@ -30,7 +30,7 @@ test('Reset isolates one class, rejects old open ballots, updates overall and ca
  const env=await envForTest();try{
   const admin=await setup(env),p=await person(env);await post(env,'/api/votes',{rankings:ranks('S'),roundId:ACTIVE_ROUND},p.cookie);
   await post(env,'/api/classes',{classId:'1ITF01',teacherNames:['Lena Dillien','Brent Pulmans','Michaël Cloots','Natalie Smets','Bart Portier','Stef Adriaansen','Stef Van Wolputte']},p.cookie);
-  await post(env,'/api/votes',{classId:'1ITF01',rankings:ranks('A'),roundId:ACTIVE_ROUND},p.cookie);
+  const otherClass=await person(env,'1ITF01');await post(env,'/api/votes',{classId:'1ITF01',rankings:ranks('A'),roundId:ACTIVE_ROUND},otherClass.cookie);
   await post(env,'/api/duels',{leftId:1,rightId:2,winnerId:1,roundId:ACTIVE_ROUND},p.cookie);
   let response=await post(env,'/api/admin/reset',{classId:'1ITF04',confirm:'RESET'},admin);assert.equal(response.status,200);let data=await response.json();assert.equal(data.classes.find(c=>c.classId==='1ITF04').votes,0);assert.equal(data.classes.find(c=>c.classId==='1ITF01').votes,1);
   data=await (await worker.fetch(new Request(origin+'/api/results',{headers:{cookie:p.cookie}}),env)).json();assert.equal(data.blind,true);assert.deepEqual(data.myDuels,[]);assert.notEqual(data.roundId,ACTIVE_ROUND);assert.equal(data.teacherNames[0],'Lena Dillien');const newRound=data.roundId;

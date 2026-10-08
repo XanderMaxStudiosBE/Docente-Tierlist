@@ -35,3 +35,9 @@ Use the installed Sites building/hosting skills and native Sites tools for publi
 Keep runtime secrets in the hosting configuration. Never commit the admin setup token, its private setup URL, passwords, Git credentials or database exports. Do not initialize a production admin account during tests.
 
 If Sites tools or access to the existing Site are unavailable in a cloud chat, complete the code change and validation in GitHub, then report that publishing requires the existing Site connection. Do not pretend a GitHub commit has published the website.
+
+## Fixed class membership
+
+- Accounts are optional: voting must work for guests with the HttpOnly voter cookie. voting_memberships is the server-side authority, keyed per browser/member and school year. Browsing another class must never change this binding.
+- Ranking, duel and favorite writes must match membership and retain revision guards against concurrent class switches. Other classes are read-only and their results are public to bound visitors; the own-class blind-voting rule remains.
+- A confirmed class switch deletes only that visitor/account’s linked vote, weekly-vote, duel and favorite rows from the departed classes in the current school year. Preserve saved designs, other visitors, archives and admin reset semantics. Keep the switch and cleanup atomic.

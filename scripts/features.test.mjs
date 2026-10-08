@@ -43,7 +43,7 @@ test('Favorites update one choice, remain class-scoped, stay blind and reset wit
 test('School years preserve legacy ballots, isolate names and overall rankings, and protect archives',async()=>{
  const env={DB:localDatabase(),ADMIN_SETUP_HASH:await digest('test-setup')};try{
   let response=await get(env,'/api/results');const cookie=response.headers.get('set-cookie').split(';')[0];const first=await response.json();assert.equal(first.year,'2026-2027');
-  await post(env,'/api/votes',{roundId:first.roundId,rankings:ranks('S')},cookie);await post(env,'/api/classes',{classId:'1ITF01',teacherNames:first.teacherNames},cookie);await post(env,'/api/votes',{classId:'1ITF01',roundId:first.roundId,rankings:ranks('A')},cookie);
+  await post(env,'/api/votes',{roundId:first.roundId,rankings:ranks('S')},cookie);await post(env,'/api/classes',{classId:'1ITF01',teacherNames:first.teacherNames},cookie);const otherClass=await get(env,'/api/results?classId=1ITF01'),otherCookie=otherClass.headers.get('set-cookie').split(';')[0];await post(env,'/api/votes',{classId:'1ITF01',roundId:first.roundId,rankings:ranks('A')},otherCookie);
   response=await post(env,'/api/admin/setup',{email:'admin@example.test',password:'test-password-long'},'',{Authorization:'Bearer test-setup'});const admin=response.headers.get('set-cookie').split(';')[0];assert.equal((await post(env,'/api/admin/year',{confirm:'NEW_YEAR'},cookie)).status,401);
   const year=await (await post(env,'/api/admin/year',{confirm:'NEW_YEAR'},admin)).json();assert.equal(year.currentYear,'2027-2028');
   let data=await (await get(env,'/api/results',cookie)).json();assert.equal(data.year,'2027-2028');assert.equal(data.myRanking.length,0);const nextRound=data.roundId;

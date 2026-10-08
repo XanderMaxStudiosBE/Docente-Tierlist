@@ -63,3 +63,5 @@ export const supportTickets = sqliteTable('support_tickets', {
 export const ticketMessages = sqliteTable('ticket_messages', {
   id:text('id').primaryKey(),ticketId:text('ticket_id').notNull(),author:text('author').notNull(),message:text('message').notNull(),createdAt:integer('created_at').notNull(),
 },t=>[index('idx_ticket_messages_ticket_created').on(t.ticketId,t.createdAt,t.id),check('ticket_author',sql`${t.author} IN ('member','admin')`)]);
+export const votingMemberships = sqliteTable('voting_memberships', {ownerId:text('owner_id').notNull(),schoolYear:text('school_year').notNull(),classId:text('class_id').notNull(),revision:text('revision').notNull()},t=>[primaryKey({columns:[t.ownerId,t.schoolYear]})]);
+export const classVoterLinks = sqliteTable('class_voter_links', {ownerId:text('owner_id').notNull(),schoolYear:text('school_year').notNull(),classId:text('class_id').notNull(),voterId:text('voter_id').notNull()},t=>[primaryKey({columns:[t.ownerId,t.schoolYear,t.classId,t.voterId]})]);

@@ -5,11 +5,12 @@ assets['/favicon.png']={base64:(await readFile(new URL('../public/favicon.png',i
 const classes=assets['/classes.js'];
 const admin=(await readFile(new URL('../worker/admin.js',import.meta.url),'utf8')).replace(/^import .*;\r?\n/gm,'');
 const features=(await readFile(new URL('../worker/features.js',import.meta.url),'utf8')).replace(/^import .*;\r?\n/gm,'');
+const membership=(await readFile(new URL('../worker/membership.js',import.meta.url),'utf8')).replace(/^import .*;\r?\n/gm,'');
 const tickets=(await readFile(new URL('../worker/tickets.js',import.meta.url),'utf8')).replace(/^import .*;\r?\n/gm,'');
 const worker=(await readFile(new URL('../worker/index.js',import.meta.url),'utf8')).replace(/^import .*;\r?\n/gm,'');
 await mkdir('dist/server',{recursive:true});
 await mkdir('dist/.openai',{recursive:true});
-await writeFile('dist/server/index.js',classes+'\n'+admin+'\n'+features+'\n'+tickets+'\n'+worker+'\nexport default createWorker('+JSON.stringify(assets)+');\n');
+await writeFile('dist/server/index.js',classes+'\n'+admin+'\n'+features+'\n'+membership+'\n'+tickets+'\n'+worker+'\nexport default createWorker('+JSON.stringify(assets)+');\n');
 await cp('.openai/hosting.json','dist/.openai/hosting.json');
 await cp('drizzle','dist/.openai/drizzle',{recursive:true});
 console.log('Worker, website en databankmigratie gebouwd.');

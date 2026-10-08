@@ -1,18 +1,14 @@
 import {yearEnvironment,FIRST_YEAR,favoriteData,handleMember,memberAccount} from './features.js';
 import {handleTickets} from './tickets.js';
+import {voterCookie,voterCookieHeader,scopedVoter,votingMembership,membershipData,handleMembership,membershipForVote,guardedVote,votingLinkStatements,membershipStillCurrent} from './membership.js';
 import {handleAdmin,activeRounds} from './admin.js';
 import {CLASS_IDS,DEFAULT_CLASS,DEFAULT_TEACHER_NAMES,validTeacherNames,resolveClass} from '../public/classes.js';
 const TIERS=['S','A','B','C','D','F'];
 export const CLASSES=CLASS_IDS;
 const DEFAULT_NAMES=DEFAULT_TEACHER_NAMES;
 export const ACTIVE_ROUND='round-2026-10-07-reset-1';
-const cookieName='docente_voter';
 function database(env){if(!env.DB)throw new Error('Stemmenopslag niet beschikbaar.');return env.DB;}
 function json(data,status=200,headers={}){return Response.json(data,{status,headers:{'Cache-Control':'no-store',...headers}});}
-function voterCookie(request){const value=request.headers.get('cookie')?.split(';').map(s=>s.trim()).find(s=>s.startsWith(cookieName+'='))?.slice(cookieName.length+1);return /^[a-f0-9-]{36}$/.test(value||'')?value:null;}
-async function voterHash(id){const digest=await crypto.subtle.digest('SHA-256',new TextEncoder().encode(id));return Array.from(new Uint8Array(digest),b=>b.toString(16).padStart(2,'0')).join('');}
-// Preserve existing 1ITF04 identities; other classes get independent browser votes.
-function scopedVoter(id,classId,year=FIRST_YEAR){const scoped=classId===DEFAULT_CLASS?id:id+':'+classId;return voterHash(year===FIRST_YEAR?scoped:scoped+':'+year);}
 function normalizeName(name){return name.normalize('NFC').trim().replace(/\s+/g,' ').toLocaleLowerCase('nl-BE');}
 async function classNames(db){const [settings]=await db.batch([db.prepare('SELECT class_id, teacher_names FROM class_settings')]);return new Map([[DEFAULT_CLASS,DEFAULT_NAMES],...settings.results.map(r=>[r.class_id,JSON.parse(r.teacher_names)])]);}
 export function weekStart(now){
@@ -29,7 +25,7 @@ export function disagreement(teacher){
   const variance=TIERS.reduce((s,t,i)=>s+((5-i)-mean)**2*teacher.counts[t],0)/teacher.total;
   return Math.sqrt(variance)/2.5*100;
 }
-async function results(env,voter,now,classId){
+async function results(env,voter,now,classId,membership){
   const db=database(env);
   const rounds=await activeRounds(db,CLASSES,env.YEAR.initialRound),round=rounds.get(classId);
   const names=await classNames(db),teacherNames=names.get(classId)||null;const teacherCount=teacherNames?.length||0;
@@ -39,9 +35,11 @@ async function results(env,voter,now,classId){
     db.prepare('SELECT COUNT(*) AS count FROM weekly_votes WHERE voter_id = ? AND round_id = ? AND week = ? AND class_id = ?').bind(voter,round,weekStart(now),classId),
   ]);
   const myRanking=mine.results.map(r=>({teacherId:r.teacher_id,tier:r.tier}));
-  const favorite=await favoriteData(db,classId,round,voter,myRanking.length===teacherCount||env.YEAR.archived);
-  const base={...env.YEAR,...favorite,classId,teacherNames,configured:!!teacherNames,roundId:round,currentWeek:weekStart(now),votedThisWeek:teacherCount>0&&weeklyMine.results[0].count===teacherCount,myRanking,myDuels:ownDuels.results.map(r=>({leftId:r.left_id,rightId:r.right_id,winnerId:r.winner_id}))};
-  if(!teacherNames||(myRanking.length!==teacherCount&&!env.YEAR.archived))return {...base,blind:true,teachers:null,overall:[],matchScore:null,weeks:[],duelResults:[]};
+  const readOnly=!!membership?.classId&&membership.classId!==classId;
+  const canVote=!!membership?.classId&&membership.classId===classId&&!membership.needsSync&&!env.YEAR.archived;
+  const favorite=await favoriteData(db,classId,round,voter,myRanking.length===teacherCount||env.YEAR.archived||readOnly);
+  const base={...env.YEAR,...favorite,membership:membership?membershipData(membership):null,canVote,readOnly,classId,teacherNames,configured:!!teacherNames,roundId:round,currentWeek:weekStart(now),votedThisWeek:teacherCount>0&&weeklyMine.results[0].count===teacherCount,myRanking,myDuels:ownDuels.results.map(r=>({leftId:r.left_id,rightId:r.right_id,winnerId:r.winner_id}))};
+  if(!teacherNames||(myRanking.length!==teacherCount&&!env.YEAR.archived&&!readOnly))return {...base,blind:true,teachers:null,overall:[],matchScore:null,weeks:[],duelResults:[]};
   const [counts,weeks,duelCounts,allCounts]=await db.batch([
     db.prepare("SELECT teacher_id, tier, COUNT(*) AS count FROM votes WHERE round_id = ? AND class_id = ? AND tier IN ('S','A','B','C','D','F') GROUP BY teacher_id, tier").bind(round,classId),
     db.prepare('SELECT week, teacher_id, tier, COUNT(*) AS count FROM weekly_votes WHERE round_id = ? AND class_id = ? GROUP BY week, teacher_id, tier ORDER BY week DESC').bind(round,classId),
@@ -71,6 +69,7 @@ export function createWorker(assets,now=()=>new Date()){return {async fetch(requ
   const url=new URL(request.url);
   if(url.pathname.startsWith('/photos/')||url.pathname==='/api/photos'||url.pathname==='/api/admin/photos')return new Response('Pagina niet gevonden',{status:404,headers:{'Cache-Control':'no-store'}});
   if(url.pathname.startsWith('/api/')){try{env=await yearEnvironment(request,env,ACTIVE_ROUND);}catch(error){return json({error:env.DB?error.message:'Stemmen tijdelijk niet beschikbaar.'},env.DB?400:503);}}
+  if(url.pathname==='/api/membership'){try{return await handleMembership(request,env,now());}catch(error){console.error('Klaskeuze:',error.message);return json({error:'Je klaskeuze is tijdelijk niet beschikbaar. Probeer opnieuw.'},503);}}
   if(url.pathname.startsWith('/api/account/')){try{return await handleMember(request,env,now());}catch(error){console.error('Account:',error.message);return json({error:'Account tijdelijk niet beschikbaar.'},503);}}
   if(url.pathname==='/api/tickets'||url.pathname.startsWith('/api/tickets/')||url.pathname==='/api/admin/tickets'||url.pathname.startsWith('/api/admin/tickets/'))return handleTickets(request,env,now());
   if(url.pathname.startsWith('/api/admin/'))return handleAdmin(request,env,now(),CLASSES,env.YEAR.initialRound);
@@ -80,8 +79,8 @@ export function createWorker(assets,now=()=>new Date()){return {async fetch(requ
         if(request.method!=='GET')return json({error:'Gebruik GET.'},405,{Allow:'GET'});
         const classId=resolveClass(url.searchParams.get('classId')??DEFAULT_CLASS);if(!classId)return json({error:'Onbekende klas.'},400);
         const existing=voterCookie(request);const id=existing||crypto.randomUUID();
-        const headers=existing?{}:{'Set-Cookie':`${cookieName}=${id}; Path=/; HttpOnly; SameSite=Lax; Max-Age=31536000${url.protocol==='https:'?'; Secure':''}`};
-        return json(await results(env,await scopedVoter(id,classId,env.YEAR.year),now(),classId),200,headers);
+        const headers=existing?{}:{'Set-Cookie':voterCookieHeader(id,url)},date=now(),membership=await votingMembership(request,env,date,id);
+        return json(await results(env,await scopedVoter(id,classId,env.YEAR.year),date,classId,membership),200,headers);
       }
       if(request.method!=='POST')return json({error:'Gebruik POST.'},405,{Allow:'POST'});
       if(env.YEAR.archived)return json({error:'Dit schooljaar is gearchiveerd. Je kunt de resultaten bekijken.'},409);
@@ -101,32 +100,36 @@ export function createWorker(assets,now=()=>new Date()){return {async fetch(requ
         const requested=body.teacherNames.map(n=>n.normalize('NFC').trim().replace(/\s+/g,' '));
         await db.batch([db.prepare('INSERT OR IGNORE INTO class_settings (class_id, teacher_names) VALUES (?, ?)').bind(classId,JSON.stringify(requested))]);
         const actual=(await classNames(db)).get(classId);if(JSON.stringify(actual)!==JSON.stringify(requested))return json({error:'Iemand heeft de docentnamen net ingesteld. Vernieuw de pagina.'},409);
-        return json(await results(env,hash,date,classId));
+        return json(await results(env,hash,date,classId,await votingMembership(request,env,date)));
       }
       if(!names.has(classId))return json({error:'Stel eerst de docentnamen van deze klas in.'},409);
       const teacherCount=names.get(classId).length;
       if(url.pathname==='/api/favorites'){
         if(Object.keys(body).some(k=>!['classId','roundId','teacherId'].includes(k))||!Number.isInteger(body.teacherId)||body.teacherId<1||body.teacherId>teacherCount)return json({error:'Kies een geldige favoriete docent.'},400);
         if(body.roundId!==round)return json({error:'Er is een nieuwe stemronde. Vernieuw de pagina.'},409);
-        await db.batch([db.prepare('INSERT INTO favorites (class_id, round_id, voter_id, teacher_id) VALUES (?, ?, ?, ?) ON CONFLICT(class_id, round_id, voter_id) DO UPDATE SET teacher_id = excluded.teacher_id').bind(classId,round,hash,body.teacherId)]);return json(await results(env,hash,date,classId));
+        const allowed=await membershipForVote(request,env,date,classId);if(allowed.error)return json({error:allowed.error},allowed.status);const membership=allowed.context;
+        await db.batch([...votingLinkStatements(env,membership,classId,hash),guardedVote(db,membership,'INSERT INTO favorites (class_id, round_id, voter_id, teacher_id) VALUES (?, ?, ?, ?) ON CONFLICT(class_id, round_id, voter_id) DO UPDATE SET teacher_id = excluded.teacher_id',[classId,round,hash,body.teacherId])]);
+        if(!await membershipStillCurrent(request,env,date,membership))return json({error:'Je klaskeuze is intussen gewijzigd. Vernieuw de pagina.'},409);return json(await results(env,hash,date,classId,membership));
       }
       const isDuel=url.pathname==='/api/duels';
       if(!isDuel&&Array.isArray(body.rankings)&&body.rankings.filter(row=>row?.tier==='S').length>1)return json({error:'Je kunt maximaal één docent S geven.'},400);
       if(!(isDuel?validateDuel(body,teacherCount):validateRanking(body,teacherCount)))return json({error:isDuel?'Kies een docent uit een geldig duel.':'Plaats alle docenten van je klas in een geldige tier.'},400);
       if(body.roundId!==round)return json({error:'Er is een nieuwe stemronde gestart. Vernieuw de pagina en stuur je ranking opnieuw in.'},409);
+      const allowed=await membershipForVote(request,env,date,classId);if(allowed.error)return json({error:allowed.error},allowed.status);const membership=allowed.context;
       let accountSaved=false;
       if(isDuel){
-        await db.batch([db.prepare('INSERT INTO duels (voter_id, round_id, left_id, right_id, winner_id, class_id) VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(voter_id, round_id, left_id, right_id) DO UPDATE SET winner_id = excluded.winner_id').bind(hash,round,body.leftId,body.rightId,body.winnerId,classId)]);
+        await db.batch([...votingLinkStatements(env,membership,classId,hash),guardedVote(db,membership,'INSERT INTO duels (voter_id, round_id, left_id, right_id, winner_id, class_id) VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(voter_id, round_id, left_id, right_id) DO UPDATE SET winner_id = excluded.winner_id',[hash,round,body.leftId,body.rightId,body.winnerId,classId])]);
       }else{
-        const week=weekStart(date),account=await memberAccount(request,env,date);
+        const week=weekStart(date),account=membership.account;
         const statements=body.rankings.flatMap(row=>[
-          db.prepare('INSERT INTO votes (voter_id, teacher_id, tier, round_id, class_id) VALUES (?, ?, ?, ?, ?) ON CONFLICT(voter_id, teacher_id) DO UPDATE SET tier = excluded.tier, round_id = excluded.round_id').bind(hash,row.teacherId,row.tier,round,classId),
-          db.prepare('INSERT INTO weekly_votes (voter_id, teacher_id, tier, round_id, week, class_id) VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(voter_id, teacher_id, round_id, week) DO UPDATE SET tier = excluded.tier').bind(hash,row.teacherId,row.tier,round,week,classId),
+          guardedVote(db,membership,'INSERT INTO votes (voter_id, teacher_id, tier, round_id, class_id) VALUES (?, ?, ?, ?, ?) ON CONFLICT(voter_id, teacher_id) DO UPDATE SET tier = excluded.tier, round_id = excluded.round_id',[hash,row.teacherId,row.tier,round,classId]),
+          guardedVote(db,membership,'INSERT INTO weekly_votes (voter_id, teacher_id, tier, round_id, week, class_id) VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(voter_id, teacher_id, round_id, week) DO UPDATE SET tier = excluded.tier',[hash,row.teacherId,row.tier,round,week,classId]),
         ]);
-        if(account)statements.push(db.prepare('INSERT INTO saved_tierlists (account_id, school_year, class_id, ranking, teacher_names) VALUES (?, ?, ?, ?, ?) ON CONFLICT(account_id, school_year, class_id) DO UPDATE SET ranking = excluded.ranking, teacher_names = excluded.teacher_names').bind(account.id,env.YEAR.year,classId,JSON.stringify(body.rankings),JSON.stringify(names.get(classId))));
-        await db.batch(statements);accountSaved=!!account;
+        if(account)statements.push(guardedVote(db,membership,'INSERT INTO saved_tierlists (account_id, school_year, class_id, ranking, teacher_names) VALUES (?, ?, ?, ?, ?) ON CONFLICT(account_id, school_year, class_id) DO UPDATE SET ranking = excluded.ranking, teacher_names = excluded.teacher_names',[account.id,env.YEAR.year,classId,JSON.stringify(body.rankings),JSON.stringify(names.get(classId))]));
+        await db.batch([...votingLinkStatements(env,membership,classId,hash),...statements]);accountSaved=!!account;
       }
-      return json({...await results(env,hash,date,classId),accountSaved});
+      if(!await membershipStillCurrent(request,env,date,membership))return json({error:'Je klaskeuze is intussen gewijzigd. Vernieuw de pagina.'},409);
+      return json({...await results(env,hash,date,classId,membership),accountSaved});
     }catch(error){console.error('Stemmenopslag:',error);return json({error:'De stemmen zijn tijdelijk niet beschikbaar. Probeer opnieuw.'},503);}
   }
   if(request.method!=='GET' && request.method!=='HEAD')return new Response('Method not allowed',{status:405,headers:{Allow:'GET, HEAD'}});

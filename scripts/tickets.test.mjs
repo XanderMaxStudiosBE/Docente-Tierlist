@@ -124,6 +124,8 @@ test('Submitting a member ranking automatically saves the correct account, class
   await post(env,'/api/votes',{roundId:initial.roundId,rankings:ranks('B')},cookie);assert.deepEqual((await (await get(env,'/api/account/tierlist?classId=1ITF04',account)).json()).ranking,ranks('B'));
   let [saved]=await env.DB.batch([env.DB.prepare('SELECT * FROM saved_tierlists')]);assert.equal(saved.results.length,1);assert.deepEqual(JSON.parse(saved.results[0].teacher_names),initial.teacherNames);
   await post(env,'/api/classes',{classId:'1ITF01',teacherNames:['Eerste docent','Tweede docent','Derde docent']},cookie);
+  const membership=await (await get(env,'/api/membership',cookie)).json();
+  assert.equal((await post(env,'/api/membership',{classId:'1ITF01',revision:membership.revision,browserRevision:membership.browserRevision,confirm:true},cookie)).status,200);
   const smaller=await (await get(env,'/api/results?classId=1ITF01',cookie)).json(),smallRanking=ranks('S').slice(0,3);
   response=await post(env,'/api/votes',{classId:'1ITF01',roundId:smaller.roundId,rankings:smallRanking},cookie);assert.equal((await response.json()).accountSaved,true);
   assert.deepEqual((await (await get(env,'/api/account/tierlist?classId=1ITF01',account)).json()).ranking,smallRanking);
